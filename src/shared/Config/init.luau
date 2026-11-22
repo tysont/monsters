@@ -35,6 +35,37 @@ export type Config = {
 		-- Validate server-to-client payloads on the client too (catches server bugs; costs CPU).
 		validateServerPayloads: boolean,
 	},
+	-- Team 1 is the west base, team 2 the east base. Names are placeholders.
+	teams: { TeamDefinition },
+	teamBalance: {
+		-- When teams have equal headcount, a joiner goes to the weaker team if the strength gap
+		-- (sum of member power) is larger than this. 1.0 is one new player's worth of power.
+		strengthTolerance: number,
+	},
+	round: {
+		-- Countdown before a round becomes Active.
+		startingSeconds: number,
+		-- Input is frozen and the result is shown.
+		endingSeconds: number,
+		-- Teams are reshuffled and the map reset; players wait at their new base.
+		intermissionSeconds: number,
+	},
+	respawn: RespawnConfig,
+}
+
+export type RespawnConfig = {
+	-- Respawn delay is base + perMinute * minutes into the round, capped at max.
+	baseSeconds: number,
+	perMinuteSeconds: number,
+	maxSeconds: number,
+	-- Spawn protection (a ForceField) after each spawn.
+	protectionSeconds: number,
+}
+
+export type TeamDefinition = {
+	name: string,
+	-- A BrickColor name; Roblox teams are identified by BrickColor.
+	brickColor: string,
 }
 
 local function base(environment: Environment): Config
@@ -50,6 +81,24 @@ local function base(environment: Environment): Config
 			defaultRateLimit = { rate = 10, burst = 20 },
 			logViolations = true,
 			validateServerPayloads = true,
+		},
+		teams = {
+			{ name = "Blue", brickColor = "Bright blue" },
+			{ name = "Red", brickColor = "Bright red" },
+		},
+		teamBalance = {
+			strengthTolerance = 0.25,
+		},
+		round = {
+			startingSeconds = 10,
+			endingSeconds = 10,
+			intermissionSeconds = 15,
+		},
+		respawn = {
+			baseSeconds = 5,
+			perMinuteSeconds = 0.25,
+			maxSeconds = 15,
+			protectionSeconds = 3,
 		},
 	}
 end

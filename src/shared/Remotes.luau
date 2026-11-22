@@ -32,6 +32,11 @@ return Net.define({
 		rateLimit = { rate = 2, burst = 5 },
 	}),
 
+	-- Dev tool: a reply to a dev chat command, shown as a system message in chat.
+	DevMessage = Net.serverToClient({
+		check = Guard.string(500),
+	}),
+
 	-- Server performance numbers for the debug overlay, sent about once a second.
 	DebugServerStats = Net.serverToClient({
 		check = Guard.struct({

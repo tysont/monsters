@@ -17,7 +17,7 @@ Working title. "Hatch a Monster" and "Monster Fighters" are the other candidates
 |---|---|---|
 | 0 | Project foundation and tooling | Complete |
 | 1 | Map greybox | Complete |
-| 2 | Teams, sessions, and round skeleton | Not Started |
+| 2 | Teams, sessions, and round skeleton | Complete |
 | 3 | Player combat core | Not Started |
 | 4 | UI foundation and HUD v1 | Not Started |
 | 5 | Minion system and load harness | Not Started |
@@ -62,6 +62,7 @@ A casual, large-team lane war. Two teams fight across a three-lane map. Each lan
 | Gold | Earned in play or bought with Robux. Cosmetics only. Never affects stats. Gold and cosmetics are account-wide. |
 | Purchases | Nothing bought with Robux may change the rate or ceiling of any stat, including how fast XP is earned. |
 | Fairness | A maxed player is about 1.5 times a new player in combat power. Cooperative attackers get a bonus against stronger targets. |
+| Team balance | Balance is headcount and strength together. Each member has a power value (their combat multiplier: 1.0 new, about 1.5 maxed); team strength is the sum. Headcount never differs by more than one; within that, joins and reshuffles favour the weaker team, and the strength gap drives small equalisers (Phase 11). Equalisers make matches slightly more even; they never let a far weaker player beat a far stronger one alone. |
 
 ### Assumptions made for this plan (confirm or change before Phase 1)
 
@@ -237,22 +238,22 @@ Added in the Phase 13B mobile and console pass: a mid-range Android phone (Galax
 
 ## Phase 2: Teams, sessions, and round skeleton
 
-**Status:** Not Started
+**Status:** Complete
 
 **Goal:** Players join, land on the smaller team, spawn, respawn, and go through a round reset.
 
 **Tasks**
 
-- [ ] Team service: two teams, assign each joiner to the smaller team, tie broken toward the team that is behind (hook only; "behind" defined in Phase 11).
-- [ ] Keep friends who join together on the same team where balance allows.
-- [ ] Handle leavers: update counts, flag imbalance for the fill logic.
-- [ ] Spawn and respawn at the team base with a respawn timer and brief spawn protection.
-- [ ] Round state machine: `Starting`, `Active`, `Ending`, `Intermission`, with replicated state and timers.
-- [ ] Round end sequence: freeze input, show result, reshuffle teams, reset map state, start next round.
-- [ ] Late join: a player joining in any state lands in the right place.
-- [ ] Developer commands (dev builds only): end round for a team, switch team, add a bot (a server-side bot entity, see section 2; not a fake player).
-- [ ] Server shutdown handling: graceful message and teleport on update (Phase 14 extends this into the full soft-shutdown and migration flow).
-- [ ] Unit tests for assignment, reshuffle, and state transitions.
+- [x] Team service: two teams, assign each joiner to the smaller team, tie broken toward the team that is behind (hook only; "behind" defined in Phase 11).
+- [x] Keep friends who join together on the same team where balance allows.
+- [x] Handle leavers: update counts, flag imbalance for the fill logic.
+- [x] Spawn and respawn at the team base with a respawn timer and brief spawn protection.
+- [x] Round state machine: `Starting`, `Active`, `Ending`, `Intermission`, with replicated state and timers.
+- [x] Round end sequence: freeze input, show result, reshuffle teams, reset map state, start next round.
+- [x] Late join: a player joining in any state lands in the right place.
+- [x] Developer commands (dev builds only): end round for a team, switch team, add a bot (a server-side bot entity, see section 2; not a fake player).
+- [x] Server shutdown handling: graceful message and teleport on update (Phase 14 extends this into the full soft-shutdown and migration flow).
+- [x] Unit tests for assignment, reshuffle, and state transitions.
 
 **Acceptance tests**
 
@@ -264,7 +265,23 @@ Added in the Phase 13B mobile and console pass: a mid-range Android phone (Galax
 
 **Implementation notes**
 
-_None yet._
+- **Pure rules (Lune tested):** `Shared.TeamAssignment` (joiner team choice, friend groups as connected components, reshuffle), `Shared.Round` (phase machine, respawn delay, clock format), `Shared.Signal` (typed in-process signal). 24 new tests, 85 in total.
+- **Join rule:** smaller team first; on a tie, the team with more of the joiner's friends; then the `TeamService.behindTeam` hook (returns nil until Phase 11); then random. Friends can only decide ties, so friends-together never unbalances teams. Friend checks (`IsFriendsWithAsync`) run in parallel with a 3 s cap before assignment.
+- **Reshuffle:** friend groups are shuffled and placed largest first on the smaller team; a group too big to fit is split so the teams never differ by more than one.
+- **Services:** `TeamService` (Roblox `Team` objects named from `Config.teams`, `Members`/`Bots` attributes per team, `Imbalance` attribute on Teams for the Phase 11 fill logic); `CharacterService` (manual spawning with `CharacterAutoLoads` off, respawn timer via the `RespawnAt` player attribute, and movement: round freeze plus the dev speed multiplier; Phase 3 stats will feed in here); `RoundService` (machine on `workspace:GetServerTimeNow()`, state replicated as attributes on ReplicatedStorage, `phaseChanged` and `roundReset` signals); `ShutdownService`.
+- **Round flow:** Ending freezes input (WalkSpeed and JumpHeight 0) and shows the result; Intermission reshuffles, fires `roundReset` (map geometry is static, so later phases reset their own NPC, guardian and egg state on this signal), respawns everyone at their new base and unfreezes; Starting spawns anyone missing. Defaults: Starting 10 s, Ending 10 s, Intermission 15 s, respawn 5 s + 0.25 s per minute (max 15 s), 3 s spawn protection (SpawnLocation ForceField; Phase 3 damage must respect it).
+- **Bots** are team slots for now (they count towards balance and reshuffle); Phase 3 gives them bodies.
+- **Team strength (added after review, 2026-11-22):** balance is headcount plus strength. `TeamAssignment.balance` returns headcounts, strength (sum of member power), the gap, team 1's share and the weaker team. Joiners: smaller team first; on equal headcount, the weaker team when the gap exceeds `Config.teamBalance.strengthTolerance` (0.25); then friends, the behind hook, random. Reshuffle: groups placed largest then strongest first onto the weaker team, then single members swapped across teams while that narrows the gap (friend groups are never split for strength). `TeamService.powerOf` returns 1.0 for everyone until Phase 9; `TeamService.balance()` and the `Strength` (per team) and `StrengthGap` (on Teams) attributes expose the numbers, and the placeholder HUD shows them. 8 new tests (93 in total).
+- **Dev commands** are chat commands (`TextChatCommand`, checked against DebugAccess on the server): `/endround [team]`, `/switchteam`, `/addbot [n]`, `/clearbots`, `/timescale [n]`, `/shutdowntest`, `/devhelp`. Replies arrive as chat system messages over the `DevMessage` remote.
+- **Soft shutdown:** on `BindToClose` (not in Studio) players see a message and are teleported together to a new reserved server (`TeleportOptions.ReservedServerId` = new GUID, teleport data `softShutdown`); that server detects itself (`PrivateServerId ~= ""` and `PrivateServerOwnerId == 0`) and sends players back to a public server after 5 s. Teleports cannot run in Studio; only the message path was verified (`/shutdowntest`). Verify on a live server at the first real update.
+- **Placeholder HUD:** `RoundHudController` shows round, phase and timer, team sizes (with bots, your team marked), the result banner, the respawn countdown and the shutdown message. Phase 4 replaces it.
+- **Deprecated APIs avoided:** `LoadCharacterAsync` and `IsFriendsWithAsync` replace `LoadCharacter` and `IsFriendsWith`.
+- **Acceptance, ten joiners:** 200 random ten-member join sequences in unit tests never exceed a difference of one; in Studio, the player plus `/addbot 9` (same assignment path) gave 5 vs 5. Studio's MCP tooling can only run one real client, so a real ten-client join and live friend grouping were not exercised; run Studio's multi-client test (Test tab, Clients and Servers) for a real-client check.
+- **Acceptance, twenty resets:** with `/timescale 20`, twenty `/endround` cycles (rounds 2 to 22) ran in 38 s with no errors. Instance count (54,909), workspace parts (91) and workspace children were identical before and after; Lua heap grew 31 KB; teams were still 5 vs 5 and movement was restored.
+- **Acceptance, late join:** a player with no character during Intermission was spawned at Starting and was playable (health 100, walk speed 16) when the round went Active. A real join runs the same assignment-then-spawn path verified at session start; a joiner during Ending is also respawned by Intermission.
+- **Also verified in Studio:** death gave a 5.1 s respawn at the team base with a ForceField; `/switchteam` moved the player to the other team and base; the result banner and freeze appeared during Ending.
+- **Performance gate:** the round logic's pure functions measured on Studio's server: a round tick 0.17 µs (run 5 times a second), a 40-member reshuffle with friend groups 33 µs (once per round), choosing a joiner's team 0.14 µs. The server held 60 Hz (16.65 ms average frame) throughout.
+- **MCP note:** `TextChannel:SendAsync` called directly in an MCP `execute_luau` never returns; send chat from a spawned thread.
 
 ---
 
@@ -509,6 +526,7 @@ _None yet._
 - [ ] Claim: add hatched monster to the stable; if full, choose one to replace.
 - [ ] Feed: convert the hatched monster to pet XP on a chosen pet, with a bonus for matching type.
 - [ ] Pet stat curve per Appendix A.
+- [ ] Set `TeamService.powerOf` from each player's combat multiplier (active class level multiplier times active pet multiplier, Appendix A), and refresh team strength when a player levels, switches class, or switches pet.
 - [ ] Active pet in the world: follows the owner, auto-attacks, uses its signature move on a cooldown; simulated in the same data pipeline as minions.
 - [ ] Switching the active pet at base.
 - [ ] Unleash reward: level XP to the owner based on what the unleashed monster achieves.
@@ -575,10 +593,11 @@ _None yet._
 **Tasks**
 
 - [ ] Telemetry events per Appendix B, sent to Roblox analytics and to a custom sink for round-level analysis.
-- [ ] Team fill: joiners go to the smaller or losing team; minion waves scale up for a team that is short on players.
+- [ ] Team fill: joiners go to the smaller team, then the weaker team by strength (Phase 2), then the losing team; minion waves scale up for a team that is short on players or strength.
+- [ ] Strength equalisers driven by `TeamService.balance()`: small, capped adjustments for the weaker team (for example minion wave strength, respawn time, objective rewards), scaled by the strength gap. They nudge matches towards even and never let a far weaker player beat a far stronger one alone.
 - [ ] Escalation: wave strength grows over the round and siege minions appear after a set time so rounds end.
 - [ ] Fading comeback help: defender bonuses are strong early and decay after a set time.
-- [ ] Power score per player (active class level, active pet) for bounty and underdog logic.
+- [ ] Power score per player (active class level, active pet) for bounty and underdog logic; this is the same value as `TeamService.powerOf`, so team strength and individual power agree.
 - [ ] Bounties: high power score or kill streak marks a player and adds a reward for defeating them.
 - [ ] Underdog bonus: attackers deal extra damage to a target in proportion to the power gap, capped (Appendix A).
 - [ ] Full, unsplit assist rewards.
@@ -593,6 +612,7 @@ _None yet._
 - Median round length is 20 to 30 minutes.
 - The team that kills the first guardian wins 55 to 60 percent of rounds.
 - A group of three new players can defeat one maxed player.
+- In bot simulation, a team holding 55 percent of total strength wins between 50 and 65 percent of rounds (starting target: equalisers help the weaker team without erasing the stronger team's edge).
 
 **Performance gate:** Telemetry adds no measurable frame cost; full regression load test passes.
 
@@ -792,6 +812,7 @@ All constants live in config and are expected to change in Phase 11.
 - **Pet power multiplier:** `1 + 0.20 * x / (x + h)`, where `x` is pet XP and `h` is the half-way constant. The ceiling is 1.20.
 - **Combined ceiling:** `1.25 * 1.20 = 1.5` times a new player.
 - **Underdog bonus:** attacker damage is multiplied by `1 + k * max(0, P_target / P_attacker - 1)`, capped, where `P` is power score. It has no effect between equals.
+- **Team strength:** each member's power `P` is their combat multiplier (level multiplier times pet multiplier, 1.0 to 1.5); team strength is the sum of `P` over the team, and the strength gap is the difference. Joiners go to the weaker team when headcount is equal and the gap exceeds `strengthTolerance` (starting value 0.25, a quarter of a new player). Phase 11 equalisers are capped functions of the gap.
 - **Starting tuning values:** wave every 30 seconds; six minions per wave; respawn five seconds plus scaling; escalation from minute 15; incubation 60 to 180 seconds by rarity; four slots per hatchery; carrier speed reduced by 30 percent.
 
 ## Appendix B: Telemetry events
@@ -846,3 +867,4 @@ Record decisions here as they are made, with the date and the reason.
 | 2026-11-22 | Low-end PC gates approximated on the development PC until Phase 15 | No low-end hardware during development; real hardware verifies before soft launch |
 | 2026-11-22 | Fun gate target age range is 9 to 14 | Matches the intended audience |
 | 2026-11-22 | Mobile and console work split into Phase 13B | Phase 13 was too large; keeps the platform pass separate from polish |
+| 2026-11-22 | Team balance is headcount plus strength (sum of member power); joins and reshuffles favour the weaker team; the gap drives capped Phase 11 equalisers | Levels make headcount alone misleading; balance should nudge matches towards even without making high levels meaningless |

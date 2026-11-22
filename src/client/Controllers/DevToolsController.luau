@@ -8,6 +8,7 @@ local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
 
 local DebugAccess = require(ReplicatedStorage.Shared.DebugAccess)
@@ -146,6 +147,17 @@ function DevToolsController.start(_self: typeof(DevToolsController))
 	if not enabled then
 		return
 	end
+
+	-- Replies to dev chat commands appear as system messages in chat.
+	Net.onClientEvent(Remotes.DevMessage, function(message: string)
+		local channels = TextChatService:FindFirstChild("TextChannels")
+		local system = channels and channels:FindFirstChild("RBXSystem")
+		if system and system:IsA("TextChannel") then
+			system:DisplaySystemMessage(`[Dev] {message}`)
+		else
+			print(`[Dev] {message}`)
+		end
+	end)
 
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 		if processed then

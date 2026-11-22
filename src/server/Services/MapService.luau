@@ -6,6 +6,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Config = require(ReplicatedStorage.Shared.Config)
 local Map = require(ReplicatedStorage.Shared.Map)
 
 local MapService = {
@@ -15,10 +16,10 @@ local MapService = {
 -- Roblox parts can be at most 2048 studs on a side; larger blocks are tiled.
 local MAX_PART_SIZE = 2000
 
-local TEAM_COLORS: { [number]: Color3 } = {
-	[1] = Color3.fromRGB(52, 120, 220),
-	[2] = Color3.fromRGB(215, 60, 60),
-}
+local function teamColor(team: number): BrickColor
+	-- Cast: the engine types only accept literal BrickColor names.
+	return BrickColor.new(Config.get().teams[team].brickColor :: any)
+end
 
 local COLORS = {
 	ground = Color3.fromRGB(96, 128, 82),
@@ -127,7 +128,7 @@ local function buildMarkers(map: Map.MapData, parent: Instance)
 			then COLORS.hatchery
 			elseif marker.kind == "camp" then COLORS.camp
 			elseif marker.kind == "minionSpawn" then COLORS.minionSpawn
-			else TEAM_COLORS[marker.team :: number]
+			else teamColor(marker.team :: number).Color
 		local name = if marker.team then `T{marker.team}_{marker.lane or "base"}_{marker.kind}` else marker.kind
 		local cframe = CFrame.new(marker.position.x, style.size.Y / 2, marker.position.z)
 		local part = newPart(name, cframe, style.size, color, folder)
@@ -153,16 +154,19 @@ local function buildBases(map: Map.MapData, parent: Instance)
 	folder.Name = "Bases"
 	for team = 1, 2 do
 		local base = map.bases[team]
-		local color = TEAM_COLORS[team]:Lerp(COLORS.ground, 0.55)
+		local color = teamColor(team).Color:Lerp(COLORS.ground, 0.55)
 		block(`Base{team}`, base, -0.9, 1, color, folder)
 
-		-- Temporary spawn; Phase 2 assigns teams and makes these team spawns.
+		-- Team spawn: players spawn at the SpawnLocation matching their team colour, with a
+		-- ForceField for the spawn protection time.
 		local spawn = Instance.new("SpawnLocation")
 		spawn.Name = `Spawn{team}`
 		spawn.Anchored = true
-		spawn.Neutral = true
-		spawn.Duration = 0
-		spawn.BrickColor = BrickColor.new(TEAM_COLORS[team])
+		spawn.Neutral = false
+		spawn.TeamColor = teamColor(team)
+		spawn.BrickColor = teamColor(team)
+		spawn.Duration = Config.get().respawn.protectionSeconds
+		spawn.AllowTeamChangeOnTouch = false
 		spawn.Material = Enum.Material.SmoothPlastic
 		spawn.Size = Vector3.new(12, 1, 12)
 		-- Spawn on the side of the base away from the lanes, clear of the Titan marker.
