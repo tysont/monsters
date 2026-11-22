@@ -1,13 +1,14 @@
 --!strict
--- Server entry point. Runs once when the server starts.
+-- Server entry point. Creates every remote, then starts the services in `Services/`.
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Greeting = require(ReplicatedStorage.Shared.Greeting)
+local Config = require(ReplicatedStorage.Shared.Config)
+local Loader = require(ReplicatedStorage.Shared.Loader)
+local Net = require(ReplicatedStorage.Shared.Net)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
 
-print("[Monsters] server started")
+Net.createRemotes(Remotes :: any)
+local started = Loader.runContainer(script.Parent.Services)
 
-Players.PlayerAdded:Connect(function(player: Player)
-	print(`[Monsters] {Greeting.forPlayer(player.Name)}`)
-end)
+print(`[Monsters] server started ({Config.get().environment}, {#started} services)`)

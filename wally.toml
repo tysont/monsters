@@ -1,0 +1,12 @@
+[package]
+name = "tysont/monsters"
+version = "0.1.0"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+private = true
+
+# Shared packages go to ReplicatedStorage.Packages (see default.project.json).
+[dependencies]
+
+# Server-only packages go to ServerScriptService.ServerPackages.
+[server-dependencies]

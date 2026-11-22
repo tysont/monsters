@@ -1,10 +1,10 @@
 --!strict
--- Client entry point. Runs once per player when they join.
+-- Client entry point. Starts the controllers in `Controllers/`.
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Greeting = require(ReplicatedStorage.Shared.Greeting)
+local Loader = require(ReplicatedStorage.Shared.Loader)
 
-local player = Players.LocalPlayer
-print(`[Monsters] client: {Greeting.forPlayer(player.Name)}`)
+local started = Loader.runContainer(script.Parent.Controllers)
+
+print(`[Monsters] client started ({#started} controllers)`)
