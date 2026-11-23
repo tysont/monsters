@@ -115,6 +115,7 @@ local function render()
 		table.insert(lines, `net     in {s.receiveKBps}  out {s.sendKBps} KB/s`)
 		table.insert(lines, `memory  {s.memoryMb} MB   inst {s.instances}`)
 		table.insert(lines, `players {s.players}`)
+		table.insert(lines, `sim     {s.simMs} ms/frame (NPCs)`)
 	else
 		table.insert(lines, "-- server: no data --")
 	end

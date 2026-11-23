@@ -12,8 +12,11 @@ local DebugAccess = require(ReplicatedStorage.Shared.DebugAccess)
 local Net = require(ReplicatedStorage.Shared.Net)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 
+local NpcService = require("./NpcService")
+
 local DebugStatsService = {
 	name = "DebugStatsService",
+	dependencies = { "NpcService" },
 }
 
 local viewers: { [Player]: true } = {}
@@ -50,6 +53,7 @@ local function broadcast()
 		memoryMb = round(Stats:GetTotalMemoryUsageMb(), 0),
 		instances = Stats.InstanceCount,
 		players = #Players:GetPlayers(),
+		simMs = round(NpcService.averageCost * 1000, 3),
 	}
 	Net.fireClients(Remotes.DebugServerStats, recipients, stats)
 end

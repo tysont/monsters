@@ -15,6 +15,7 @@ local StarterPlayer = game:GetService("StarterPlayer")
 local Config = require(ReplicatedStorage.Shared.Config)
 local MapLayout = require(ReplicatedStorage.Shared.Config.MapLayout)
 local Round = require(ReplicatedStorage.Shared.Round)
+local Signal = require(ReplicatedStorage.Shared.Signal)
 
 local TeamService = require("./TeamService")
 
@@ -25,6 +26,8 @@ local CharacterService = {
 	activeSeconds = function(): number
 		return 0
 	end,
+	-- Fires after a player's character spawns (CombatService sets up health, stats and weapon).
+	characterSpawned = Signal.new() :: Signal.Signal<Player, Model>,
 }
 
 local frozen = false
@@ -96,6 +99,7 @@ function CharacterService.spawn(player: Player)
 				scheduleRespawn(player, character)
 			end)
 		end
+		CharacterService.characterSpawned:fire(player, character)
 	end
 end
 

@@ -18,7 +18,7 @@ Working title. "Hatch a Monster" and "Monster Fighters" are the other candidates
 | 0 | Project foundation and tooling | Complete |
 | 1 | Map greybox | Complete |
 | 2 | Teams, sessions, and round skeleton | Complete |
-| 3 | Player combat core | Not Started |
+| 3 | Player combat core | In Progress |
 | 4 | UI foundation and HUD v1 | Not Started |
 | 5 | Minion system and load harness | Not Started |
 | 6 | Guardians and Titan (first full round) | Not Started |
@@ -287,25 +287,25 @@ Added in the Phase 13B mobile and console pass: a mid-range Android phone (Galax
 
 ## Phase 3: Player combat core
 
-**Status:** Not Started
+**Status:** In Progress
 
 **Goal:** One class (Knight) that can attack, dodge, take damage, die, and fight other players, with server-authoritative results.
 
 **Tasks**
 
-- [ ] Stats component per player: max health, health, damage, defence, move speed, derived from a single pure stat function whose input is the active class level (stubbed until Phase 9) and the active pet (stubbed).
-- [ ] Input layer mapping touch, mouse and keyboard, and gamepad to the same actions.
-- [ ] Melee attack: client plays the swing immediately; server validates range, arc, cooldown, and line of sight, then applies damage.
-- [ ] Dodge with a short invulnerability window and cooldown.
-- [ ] Damage pipeline: one function for all damage, with source, target, type, and modifiers, emitting events for UI and telemetry. Targets can be player characters or NPC rows through one interface.
-- [ ] Health regeneration out of combat and at base.
-- [ ] Death, kill credit, assist credit (anyone who damaged the target in the last 10 seconds), respawn.
-- [ ] Lag handling: server accepts hits within a bounded latency window and rejects impossible ones.
-- [ ] Unit tests for the stat function and the damage pipeline.
-- [ ] Combat gym: a dev-only test area with a target dummy, a simple bot that walks and attacks, a spawner for a pack of weak enemies, and one test monster that uses a telegraphed ground slam (minimal state machine: idle, telegraph, attack, recover). This is a throwaway precursor to the Phase 6 monster framework, not a replacement for it. Gym enemies and the test monster are built as a minimal version of the data-driven NPC model (server rows, client rendering), not Humanoid characters, so Phase 5 extends this rather than replacing it.
-- [ ] Placeholder combat feedback: hit flash, hit-stop, knockback, damage numbers, a basic health bar, hit and swing sounds, light camera shake. Rough quality is acceptable; each must be present. Hit-stop is purely visual on each player's own screen and never pauses the server simulation. Damage numbers and the health bar are replaced in Phase 4.
-- [ ] Live tuning panel (dev builds only) for attack speed, attack range and arc, dodge distance and cooldown, invulnerability window, hit-stop duration, knockback strength, and enemy health.
-- [ ] Instrument input-to-swing latency and time-to-kill in the gym.
+- [x] Stats component per player: max health, health, damage, defence, move speed, derived from a single pure stat function whose input is the active class level (stubbed until Phase 9) and the active pet (stubbed).
+- [x] Input layer mapping touch, mouse and keyboard, and gamepad to the same actions.
+- [x] Melee attack: client plays the swing immediately; server validates range, arc, cooldown, and line of sight, then applies damage.
+- [x] Dodge with a short invulnerability window and cooldown.
+- [x] Damage pipeline: one function for all damage, with source, target, type, and modifiers, emitting events for UI and telemetry. Targets can be player characters or NPC rows through one interface.
+- [x] Health regeneration out of combat and at base.
+- [x] Death, kill credit, assist credit (anyone who damaged the target in the last 10 seconds), respawn.
+- [x] Lag handling: server accepts hits within a bounded latency window and rejects impossible ones.
+- [x] Unit tests for the stat function and the damage pipeline.
+- [x] Combat gym: a dev-only test area with a target dummy, a simple bot that walks and attacks, a spawner for a pack of weak enemies, and one test monster that uses a telegraphed ground slam (minimal state machine: idle, telegraph, attack, recover). This is a throwaway precursor to the Phase 6 monster framework, not a replacement for it. Gym enemies and the test monster are built as a minimal version of the data-driven NPC model (server rows, client rendering), not Humanoid characters, so Phase 5 extends this rather than replacing it.
+- [x] Placeholder combat feedback: hit flash, hit-stop, knockback, damage numbers, a basic health bar, hit and swing sounds, light camera shake. Rough quality is acceptable; each must be present. Hit-stop is purely visual on each player's own screen and never pauses the server simulation. Damage numbers and the health bar are replaced in Phase 4.
+- [x] Live tuning panel (dev builds only) for attack speed, attack range and arc, dodge distance and cooldown, invulnerability window, hit-stop duration, knockback strength, and enemy health.
+- [x] Instrument input-to-swing latency and time-to-kill in the gym.
 
 **Acceptance tests**
 
@@ -328,7 +328,24 @@ Added in the Phase 13B mobile and console pass: a mid-range Android phone (Galax
 
 **Implementation notes**
 
-_None yet._
+- **Status:** everything is built and the automated acceptance tests and performance gate pass. Phase 3 stays In Progress until the fun gate (human playtesters) passes, and the two-client acceptance test still needs a real multi-client session.
+- **Pure core (Lune tested, 21 new tests, 114 in total):** `Shared.Combat.Stats` (Appendix A; level 1 = exactly 1.0, the input is class level), `Damage` (the single pipeline: friendly fire, spawn protection, dodge invulnerability, defence, minimum 1 damage, kill and assists within 10 s), `Melee` (range by body edge, arc, nearest-first cap, cooldown with jitter tolerance), `History` (position ring buffer with interpolation, for rewind), `NpcCodec` (snapshot buffers: 10-byte header plus 9 bytes per NPC, split under 900 bytes), `Tuning` (live values with limits).
+- **Server authority:** the client sends only a facing direction (`CombatAttack`) or a dodge (`CombatDodge`). `CombatService` checks the round phase and cooldown (0.05 s jitter tolerance), rewinds target positions by the attacker's ping (capped at 0.25 s), selects targets by range (+2 studs tolerance for players) and arc, checks line of sight against map and gym walls, then applies damage through `Damage.apply`. Health lives on the server and is mirrored into `Humanoid.Health`; the default Health script is removed so regeneration is only out of combat (2%/s after 5 s) and at base (10%/s). Spawn protection is the SpawnLocation ForceField.
+- **Dodge:** the client moves itself with a short `LinearVelocity` (the client owns its character's physics); the server grants invulnerability starting half a ping before the request arrived. Monster area attacks resolve 0.1 s after impact so a dodge sent just before impact still counts.
+- **NPCs are data rows** (`NpcService`): no Humanoid or physics on the server; 10 Hz tick and snapshots; clients render pooled-style local models with 100 ms interpolation (`NpcRenderController`). Kinds: dummy (heals after 3 s, not pushed by knockback), weak (40 HP, 4 damage every 1.5 s; softened from 5 every 1.2 s after a 3-pack killed a player in about 8 s), slammer (400 HP, 1 s telegraph, 14-stud slam for 35, 1.5 s recover), bot (Knight stats, team, uses the same `meleeSwing` path as players).
+- **Instant feel:** the swing animation (procedural shoulder motion; no animation assets yet) and swing sound start on input; the client predicts its own hits with the same `Melee` rules for hit-stop, flash, hit sound and a light shake; damage numbers come from the server (pooled, no per-hit instance creation). Feedback lives in `src/client/Feedback.luau`.
+- **Input:** `ContextActionService` actions: Attack (left mouse, R2, X; on-screen button on touch), Dodge (Q, B; on-screen button on touch). Attacks aim where the camera looks and turn the character to match. Clicks on visible UI buttons are ignored.
+- **Sounds (placeholders, ProSoundEffects via Roblox):** swing 9119710806, hit 9117971636, slam 9113524242 (`Config.combat.sounds`).
+- **Dev tools:** the gym is a walled arena at z = 900 (off the map), built only when `Config.combat.gym.enabled` (off in production). Chat commands `/gym`, `/base`, `/dummy`, `/slammer`, `/pack [n]`, `/botfight [n]`, `/clearnpcs`, `/heal`. The tuning panel toggles with the backquote key (F7 is taken by Studio); values are replicated attributes on ReplicatedStorage.CombatTuning, so changes apply to server and clients at once. Time-to-kill arrives as a chat message; swing latency shows in the panel; NPC simulation cost shows in the debug overlay (`sim`).
+- **Acceptance, cheating client:** 20 attack requests in 1 s at point blank dealt 59 damage (3 swings at the 0.5 s cooldown; the rate limiter also logged the flood); 10 requests from 30 studs and 3 requests facing away dealt nothing.
+- **Acceptance, 200 ms latency** (`settings().Network` 100 ms each way, restored to 0 afterwards): all 5 attacks on the dummy hit; server confirmations arrived about 235 ms after each request (one round trip plus a frame) while the swing itself started locally at once.
+- **Acceptance, swing latency:** input to the first animated swing frame averaged 0.7 ms (max 0.8 ms, 5 samples), plus at most one 16.7 ms frame to display, measured on the development PC (stronger than the mid-range reference).
+- **Acceptance, weak enemies:** three kills, each 2 hits, about 0.55 s from first hit.
+- **Acceptance, slam dodge:** standing still under the slam took 35 damage after a visible 1.1 s telegraph. With the dodge request sent 0.8 s into the telegraph, no damage (twice); sent 0.4 s in, the invulnerability had ended and the full 35 landed (twice). In normal play a dodge also moves the player 14 studs, out of the 14-stud slam circle.
+- **Acceptance, two clients:** not yet run (MCP tooling drives one client). Health and deaths are decided only on the server and replicated, so clients cannot disagree on outcomes by design; confirm with Studio's multi-client test (Test tab, Clients and Servers, 2 players) during the fun gate session.
+- **Performance gate:** `/botfight 20` (40 bots) for 25 s: NPC simulation (AI, melee through the damage pipeline, snapshots) averaged 0.035 ms per frame, max 0.075 ms; server held 60 Hz (worst frame 19.6 ms); 105 defeats; server send about 3.8 KB/s. Measured on the development PC.
+- **Fun gate access (open):** the gym and its commands only exist in Studio and for the owner, and live servers count as production. For outside playtesters on the main place, a playtest mode is needed (see the hand-off question to the owner).
+- **Fun gate rounds:** none yet.
 
 ---
 
