@@ -88,6 +88,11 @@ local function attach(player: Player, character: Model)
 		local level = player:GetAttribute("ClassLevel")
 		local account = player:GetAttribute("AccountLevel")
 		local title = player:GetAttribute("Title")
+		local cosmeticTitle = player:GetAttribute("CosmeticTitle")
+		if type(cosmeticTitle) == "string" then
+			-- A bought title replaces the account-level one on the nameplate.
+			title = cosmeticTitle
+		end
 		-- Class level, then account level (and title once earned).
 		plate.name.Text = `{player.DisplayName}  ·  Lv {if type(level) == "number" then level else 1}`
 			.. `  ·  Acct {if type(account) == "number" then account else 1}`
@@ -110,6 +115,7 @@ local function attach(player: Player, character: Model)
 	table.insert(plate.connections, player:GetAttributeChangedSignal("AccountLevel"):Connect(refresh))
 	table.insert(plate.connections, player:GetAttributeChangedSignal("Title"):Connect(refresh))
 	table.insert(plate.connections, player:GetAttributeChangedSignal("Bounty"):Connect(refresh))
+	table.insert(plate.connections, player:GetAttributeChangedSignal("CosmeticTitle"):Connect(refresh))
 	table.insert(plate.connections, player:GetAttributeChangedSignal("Idle"):Connect(refresh))
 	refresh()
 

@@ -106,6 +106,8 @@ export type SpawnOptions = {
 	follow: CombatService.Entry?,
 	-- Body size multiplier (pets are smaller).
 	scale: number?,
+	-- Colour override 0xRRGGBB (pet skins).
+	tint: number?,
 }
 
 -- A bolt, or a charging monster (carrier = true: moves the monster and passes through everything
@@ -785,6 +787,7 @@ spawnMonster = function(
 		maxHealth = math.max(1, math.floor(def.maxHealth * scale + 0.5)),
 		radius = def.radius * (opts.scale or 1),
 		scale = opts.scale,
+		tint = opts.tint,
 		speed = def.speed,
 		damage = 0,
 		defence = def.defence,

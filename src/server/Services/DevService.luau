@@ -34,6 +34,7 @@
 --   /balance  /dashboard   balance state (equalisers, escalation); telemetry dashboard
 --   /boss  /idle  /roundskip minutes   spawn the jungle boss; mark yourself idle; age the round
 --   /hurt amount [range]  hit the nearest hostile as yourself (dev damage)
+--   /gold n            give yourself gold   /receipt id [userId]  run a dev receipt (product 1)
 --   /classduel [classes] [maxClass]  three level-1 class bots against one maxed bot (balance)
 --   /pack [n]          spawn a pack of weak enemies in the gym (default 5)
 --   /botfight [n]      spawn n bots per team fighting in the gym (default 5)
@@ -72,12 +73,14 @@ local CampService = require("./CampService")
 local ClassBotService = require("./ClassBotService")
 local ClassService = require("./ClassService")
 local DataService = require("./DataService")
+local EconomyService = require("./EconomyService")
 local EggService = require("./EggService")
 local MinionService = require("./MinionService")
 local MonsterService = require("./MonsterService")
 local NpcService = require("./NpcService")
 local PetService = require("./PetService")
 local ProgressionService = require("./ProgressionService")
+local PurchaseService = require("./PurchaseService")
 local RoundService = require("./RoundService")
 local ShutdownService = require("./ShutdownService")
 local TeamService = require("./TeamService")
@@ -106,6 +109,8 @@ local DevService = {
 		"BalanceService",
 		"JungleBossService",
 		"TelemetryService",
+		"EconomyService",
+		"PurchaseService",
 	},
 }
 
@@ -781,6 +786,26 @@ local MONSTER_COMMANDS: { Command } = {
 					and result.killed
 				then " (killed)"
 				else ""}.`
+		end,
+	},
+	{
+		alias = "/gold",
+		usage = "/gold amount",
+		run = function(player: Player, args: { string }): string
+			EconomyService.grant(player, tonumber(args[1]) or 1000)
+			return `Gold: {player:GetAttribute("Gold")}.`
+		end,
+	},
+	{
+		alias = "/receipt",
+		usage = "/receipt purchaseId [userId]",
+		run = function(player: Player, args: { string }): string
+			local decision = PurchaseService.process({
+				PlayerId = tonumber(args[2]) or player.UserId,
+				ProductId = 1,
+				PurchaseId = args[1] or "dev-receipt",
+			})
+			return `Receipt {args[1] or "dev-receipt"}: {decision.Name}. Gold: {player:GetAttribute("Gold")}.`
 		end,
 	},
 	{

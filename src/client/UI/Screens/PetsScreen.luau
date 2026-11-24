@@ -16,7 +16,7 @@ local UiState = require("../UiState")
 
 local Children = Fusion.Children
 
-export type PetInfo = { id: number, kind: string, xp: number, multiplier: number, active: boolean }
+export type PetInfo = { id: number, kind: string, xp: number, multiplier: number, active: boolean, skin: string? }
 
 export type Props = {
 	open: Fusion.Value<boolean>,

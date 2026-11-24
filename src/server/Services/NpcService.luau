@@ -72,6 +72,8 @@ export type Row = {
 	aux: number,
 	-- Body size multiplier for clients.
 	scale: number?,
+	-- Colour override 0xRRGGBB for clients (pet skins).
+	tint: number?,
 	-- Survives NpcService.clear() (structures).
 	persistent: boolean,
 	-- Custom rows: called at 10 Hz while the round allows input.
@@ -101,6 +103,7 @@ export type CustomSpawn = {
 	persistent: boolean,
 	-- Body size multiplier for clients (nil for 1).
 	scale: number?,
+	tint: number?,
 	tick: (row: Row, t: number, dt: number) -> (),
 	-- Called after the row takes a hit (after the shared knockback handling).
 	onHit: ((row: Row, result: Damage.Result) -> ())?,
@@ -138,6 +141,7 @@ local function spawnEvent(row: Row): Remotes.NpcSpawnEvent
 		maxHealth = row.entry.combatant.maxHealth,
 		radius = row.entry.radius,
 		scale = row.scale,
+		tint = row.tint,
 	}
 end
 
@@ -282,6 +286,7 @@ function NpcService.spawnCustom(options: CustomSpawn): Row
 	}, options.pushable, options.persistent)
 	row.tick = options.tick
 	row.scale = options.scale
+	row.tint = options.tint
 	local onHit = options.onHit
 	if onHit then
 		local shared = row.entry.onHit :: (Damage.Result, Vector3) -> ()

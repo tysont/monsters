@@ -34,6 +34,10 @@ local PetService = {
 		"ProgressionService",
 		"TeamService",
 	},
+	-- Colour override (0xRRGGBB) for a player's pet: its skin (CosmeticService).
+	tintOf = function(_player: Player): number?
+		return nil
+	end,
 }
 
 local pets: { [Player]: MonsterService.Monster } = {}
@@ -53,7 +57,8 @@ function PetService.spawnFor(
 	follow: CombatService.Entry,
 	team: number?,
 	kind: string,
-	petXp: number
+	petXp: number,
+	tint: number?
 ): MonsterService.Monster?
 	if Config.get().monsters[kind] == nil then
 		return nil
@@ -68,6 +73,7 @@ function PetService.spawnFor(
 		follow = follow,
 		scale = PET_SCALE,
 		damageScale = damage,
+		tint = tint,
 	})
 end
 
@@ -82,7 +88,7 @@ local function spawnPet(player: Player)
 	if pet == nil then
 		return
 	end
-	local m = PetService.spawnFor(entry, TeamService.teamOf(player), pet.kind, pet.xp)
+	local m = PetService.spawnFor(entry, TeamService.teamOf(player), pet.kind, pet.xp, PetService.tintOf(player))
 	if m then
 		pets[player] = m
 	end
@@ -97,6 +103,11 @@ local function inOwnBase(player: Player): boolean
 	end
 	local base = Map.get().bases[team]
 	return math.abs(p.X - base.center.x) <= base.size.x / 2 and math.abs(p.Z - base.center.z) <= base.size.z / 2
+end
+
+-- Spawns the player's active pet again (after its skin changes).
+function PetService.respawn(player: Player)
+	spawnPet(player)
 end
 
 function PetService.petOf(player: Player): MonsterService.Monster?

@@ -52,6 +52,8 @@ export type NpcSpawnEvent = {
 	radius: number,
 	-- Body size multiplier (pets are smaller); nil for 1.
 	scale: number?,
+	-- Colour override 0xRRGGBB (pet skins); nil for the definition's colour.
+	tint: number?,
 }
 
 -- A monster attack for clients to draw. Times are server time.
@@ -136,6 +138,28 @@ export type LaunchEvent = {
 	apex: number,
 	-- What it flies to, for the toast (e.g. "top outer guardian").
 	label: string,
+}
+
+-- Phase 12 shop and cosmetics.
+export type EquipRequest = {
+	slot: string,
+	-- nil clears the slot.
+	item: string?,
+}
+
+export type PetSkinRequest = {
+	pet: number,
+	item: string?,
+}
+
+export type KillEffectEvent = {
+	item: string,
+	position: Vector3,
+}
+
+export type EmoteEvent = {
+	player: number,
+	item: string,
 }
 
 export type AnnounceEvent = {
@@ -238,6 +262,7 @@ return Net.define({
 			maxHealth = finite,
 			radius = finite,
 			scale = Guard.optional(finite),
+			tint = Guard.optional(id),
 		}) :: Guard.Check<NpcSpawnEvent>,
 	}),
 
@@ -389,6 +414,49 @@ return Net.define({
 			text = Guard.string(200),
 			kind = Guard.string(16),
 		}) :: Guard.Check<AnnounceEvent>,
+	}),
+
+	-- Shop and cosmetics (Phase 12) ---------------------------------------------------------
+
+	BuyCosmetic = Net.clientToServer({
+		check = Guard.string(32),
+		rateLimit = { rate = 2, burst = 5 },
+	}),
+
+	EquipCosmetic = Net.clientToServer({
+		check = Guard.struct({
+			slot = Guard.string(16),
+			item = Guard.optional(Guard.string(32)),
+		}) :: Guard.Check<EquipRequest>,
+		rateLimit = { rate = 4, burst = 10 },
+	}),
+
+	SelectLoadout = Net.clientToServer({
+		check = Guard.number({ integer = true, min = 1, max = 10 }),
+		rateLimit = { rate = 2, burst = 5 },
+	}),
+
+	SetPetSkin = Net.clientToServer({
+		check = Guard.struct({
+			pet = id,
+			item = Guard.optional(Guard.string(32)),
+		}) :: Guard.Check<PetSkinRequest>,
+		rateLimit = { rate = 2, burst = 5 },
+	}),
+
+	-- Play your equipped emote (others nearby see it).
+	Emote = Net.clientToServer({
+		check = Guard.none,
+		rateLimit = { rate = 0.5, burst = 2 },
+	}),
+
+	EmotePlayed = Net.serverToClient({
+		check = Guard.struct({ player = id, item = Guard.string(32) }) :: Guard.Check<EmoteEvent>,
+	}),
+
+	-- A kill effect where a victim fell (the killer's equipped effect).
+	KillEffect = Net.serverToClient({
+		check = Guard.struct({ item = Guard.string(32), position = Guard.vector3() }) :: Guard.Check<KillEffectEvent>,
 	}),
 
 	-- Rounds ---------------------------------------------------------------------------------

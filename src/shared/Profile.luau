@@ -31,6 +31,19 @@ export type Data = {
 	nextPetId: number,
 	gold: number,
 	cosmetics: { [string]: boolean },
+	-- Cosmetic loadout presets (slot -> item ID) and which one is worn (Phase 12).
+	loadouts: { { [string]: string } },
+	activeLoadout: number,
+	-- Robux receipts already granted (most recent), and purchase history.
+	receipts: { string },
+	purchases: { { receipt: string, product: number, gold: number, at: number } },
+	-- Daily login streak and quests.
+	daily: {
+		lastLoginDay: number,
+		streak: number,
+		questDay: number,
+		quests: { { id: string, progress: number, done: boolean } },
+	},
 	settings: { [string]: any },
 	stats: {
 		rounds: number,
@@ -38,6 +51,7 @@ export type Data = {
 		kills: number,
 		deaths: number,
 		eggsHatched: number,
+		goldEarned: number,
 	},
 }
 
@@ -58,8 +72,13 @@ function Profile.new(): Data
 		nextPetId = 1,
 		gold = 0,
 		cosmetics = {},
+		loadouts = { {} },
+		activeLoadout = 1,
+		receipts = {},
+		purchases = {},
+		daily = { lastLoginDay = 0, streak = 0, questDay = 0, quests = {} },
 		settings = {},
-		stats = { rounds = 0, wins = 0, kills = 0, deaths = 0, eggsHatched = 0 },
+		stats = { rounds = 0, wins = 0, kills = 0, deaths = 0, eggsHatched = 0, goldEarned = 0 },
 	}
 end
 

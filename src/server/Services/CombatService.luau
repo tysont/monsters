@@ -98,6 +98,8 @@ local CombatService = {
 	creditedNear = Signal.new() :: Signal.Signal<Vector3, number?, number>,
 	-- (sourceId, targetId, amount): a heal, heal over time, or shield absorbing damage.
 	supported = Signal.new() :: Signal.Signal<number, number, number>,
+	-- (character) after a class weapon is put in its hand (CosmeticService re-skins it).
+	weaponDressed = Signal.new() :: Signal.Signal<Model>,
 	-- Class level of a player for the stat function (ProgressionService).
 	classLevelOf = function(_player: Player): number
 		return 1
@@ -653,6 +655,7 @@ function CombatService.dressWeapon(character: Model, classId: string, level: num
 		sparkles.Parent = accentPart
 	end
 	model.Parent = character
+	CombatService.weaponDressed:fire(character)
 end
 
 local function onCharacterSpawned(player: Player, character: Model)

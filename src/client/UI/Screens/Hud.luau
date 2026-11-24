@@ -64,6 +64,8 @@ export type HudState = {
 	abilitySlots: Fusion.Value<{ AbilitySlot }>,
 	abilityCooldowns: { Fusion.Value<number> },
 	statuses: Fusion.Value<{ string }>,
+	-- Gold balance (Phase 12).
+	gold: Fusion.Value<number>,
 }
 
 export type AbilitySlot = {
@@ -91,6 +93,8 @@ export type Actions = {
 	openSettings: () -> (),
 	openPets: () -> (),
 	openClasses: () -> (),
+	openShop: () -> (),
+	openLoadout: () -> (),
 	cast: (slot: number) -> (),
 }
 
@@ -785,6 +789,31 @@ local function Hud(scope: UiState.Scope, state: HudState, actions: Actions): { F
 			onClick = actions.openPets,
 			anchorPoint = Vector2.new(0, 1),
 			position = UDim2.new(0, Theme.space.lg + 56, 1, -Theme.space.lg),
+		}),
+		IconButton(scope, {
+			name = "Shop",
+			icon = "🛒",
+			tooltip = "Shop (H)",
+			onClick = actions.openShop,
+			anchorPoint = Vector2.new(0, 1),
+			position = UDim2.new(0, Theme.space.lg + 112, 1, -Theme.space.lg),
+		}),
+		IconButton(scope, {
+			name = "Loadout",
+			icon = "🎽",
+			tooltip = "Loadout (J)",
+			onClick = actions.openLoadout,
+			anchorPoint = Vector2.new(0, 1),
+			position = UDim2.new(0, Theme.space.lg + 168, 1, -Theme.space.lg),
+		}),
+		Badge(scope, {
+			name = "Gold",
+			text = scope:Computed(function(use)
+				return `{use(state.gold)} gold`
+			end),
+			color = Theme.color.warning,
+			anchorPoint = Vector2.new(0, 1),
+			position = UDim2.new(0, Theme.space.lg + 228, 1, -Theme.space.lg - 12),
 		}),
 
 		statusRow(scope, state),

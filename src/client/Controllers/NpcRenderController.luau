@@ -246,16 +246,24 @@ local function monsterModel(model: Model, kind: string, def: Config.MonsterDefin
 	return { root = root, height = bodyHeight, sword = nil, eyes = eyes }
 end
 
--- The monster definition for a spawn, resized for its scale (pets are smaller).
+-- The monster definition for a spawn, resized for its scale (pets are smaller) and recoloured
+-- for a pet skin.
 local function definitionFor(event: Remotes.NpcSpawnEvent): Config.MonsterDefinition?
 	local def = Config.get().monsters[event.kind]
 	local scale = event.scale
-	if def == nil or scale == nil or scale == 1 then
+	local tint = event.tint
+	if def == nil or ((scale == nil or scale == 1) and tint == nil) then
 		return def
 	end
 	local resized = table.clone(def)
-	resized.radius = def.radius * scale
-	resized.height = def.height * scale
+	resized.radius = def.radius * (scale or 1)
+	resized.height = def.height * (scale or 1)
+	if tint then
+		-- Pet skin: same shape, the skin's colour.
+		local color = { bit32.rshift(tint, 16) % 256, bit32.rshift(tint, 8) % 256, tint % 256 }
+		local look = def.look
+		resized.look = { shape = if look then look.shape else "blocky", color = color }
+	end
 	return resized
 end
 

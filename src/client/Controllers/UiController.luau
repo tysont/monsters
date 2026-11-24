@@ -8,6 +8,7 @@
 
 local ContextActionService = game:GetService("ContextActionService")
 local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -26,6 +27,7 @@ local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Round = require(ReplicatedStorage.Shared.Round)
 
 local AbilityController = require("./AbilityController")
+local CosmeticFxController = require("./CosmeticFxController")
 local CombatController = require("./CombatController")
 local EggController = require("./EggController")
 local NpcRenderController = require("./NpcRenderController")
@@ -34,6 +36,8 @@ local Feedback = require("../Feedback")
 local Gallery = require("../UI/Screens/Gallery")
 local ClassPicker = require("../UI/Screens/ClassPicker")
 local HatchDialog = require("../UI/Screens/HatchDialog")
+local LoadoutScreen = require("../UI/Screens/LoadoutScreen")
+local ShopScreen = require("../UI/Screens/ShopScreen")
 local PetsScreen = require("../UI/Screens/PetsScreen")
 local Hud = require("../UI/Screens/Hud")
 local Layout = require("../UI/Layout")
@@ -96,6 +100,7 @@ local state: Hud.HudState = {
 	abilitySlots = scope:Value({} :: { Hud.AbilitySlot }),
 	abilityCooldowns = { scope:Value(0), scope:Value(0), scope:Value(0) },
 	statuses = scope:Value({} :: { string }),
+	gold = scope:Value(0),
 }
 
 local settingsOpen = scope:Value(false)
@@ -107,6 +112,14 @@ local petsOpen = scope:Value(false)
 local pets = scope:Value({} :: { PetsScreen.PetInfo })
 local petSlots = scope:Value(1)
 local classOpen = scope:Value(false)
+local shopOpen = scope:Value(false)
+local loadoutOpen = scope:Value(false)
+local owned = scope:Value({} :: { [string]: boolean })
+local loadout = scope:Value({} :: { [string]: string })
+local loadoutIndex = scope:Value(1)
+local loadoutCount = scope:Value(1)
+local quests = scope:Value({} :: { ShopScreen.QuestInfo })
+local streak = scope:Value(0)
 local classLevels = scope:Value({} :: { [string]: number })
 local activeClass = scope:Value("knight")
 local firstPick = scope:Value(false)
@@ -413,6 +426,64 @@ local function onKill(event: Remotes.KillEvent)
 	end
 end
 
+-- Shop and loadout ---------------------------------------------------------------------------
+
+local function equipItem(slot: string, itemId: string?)
+	Net.fireServer(Remotes.EquipCosmetic, { slot = slot, item = itemId })
+end
+
+-- Gold packs that exist on Roblox (a product ID is configured).
+local function availablePacks(): { ShopScreen.PackInfo }
+	local out: { ShopScreen.PackInfo } = {}
+	for _, pack in Config.get().economy.goldPacks do
+		if pack.productId ~= 0 and pack.robux > 0 then
+			table.insert(out, { id = pack.id, gold = pack.gold, robux = pack.robux })
+		end
+	end
+	return out
+end
+
+local function buyPack(packId: string)
+	for _, pack in Config.get().economy.goldPacks do
+		if pack.id == packId and pack.productId ~= 0 then
+			MarketplaceService:PromptProductPurchase(player, pack.productId)
+		end
+	end
+end
+
+local function decode(name: string): any
+	local raw = player:GetAttribute(name)
+	if type(raw) ~= "string" then
+		return nil
+	end
+	local ok, value = pcall(HttpService.JSONDecode, HttpService, raw)
+	return if ok then value else nil
+end
+
+-- Gold, owned items, the worn loadout and daily quests from the player's attributes.
+local function readEconomy()
+	state.gold:set(attribute(player, "Gold", 0))
+	local list = decode("Owned")
+	if type(list) == "table" then
+		local set: { [string]: boolean } = {}
+		for _, id in list do
+			set[id] = true
+		end
+		owned:set(set)
+	end
+	local worn = decode("Loadout")
+	if type(worn) == "table" then
+		loadout:set(worn)
+	end
+	loadoutIndex:set(attribute(player, "LoadoutIndex", 1))
+	loadoutCount:set(attribute(player, "LoadoutCount", 1))
+	local q = decode("Quests")
+	if type(q) == "table" then
+		quests:set(q)
+	end
+	streak:set(attribute(player, "LoginStreak", 0))
+end
+
 -- Classes ----------------------------------------------------------------------------------
 
 local function chooseClass(classId: string)
@@ -521,6 +592,12 @@ function UiController.start(_self: typeof(UiController))
 			openClasses = function()
 				classOpen:set(true)
 			end,
+			openShop = function()
+				shopOpen:set(true)
+			end,
+			openLoadout = function()
+				loadoutOpen:set(true)
+			end,
 			openPets = function()
 				petsOpen:set(true)
 			end,
@@ -531,6 +608,43 @@ function UiController.start(_self: typeof(UiController))
 	)
 	local overlay = Layout.screen(scope, "Menus", 50, playerGui, {
 		SettingsScreen(scope, settingsOpen),
+		ShopScreen(scope, {
+			open = shopOpen,
+			gold = state.gold,
+			owned = owned,
+			loadout = loadout,
+			quests = quests,
+			streak = streak,
+			packs = availablePacks(),
+			buy = function(itemId: string)
+				Net.fireServer(Remotes.BuyCosmetic, itemId)
+			end,
+			equip = equipItem,
+			preview = CosmeticFxController.preview,
+			buyPack = buyPack,
+		}),
+		LoadoutScreen(scope, {
+			open = loadoutOpen,
+			owned = owned,
+			loadout = loadout,
+			loadoutIndex = loadoutIndex,
+			loadoutCount = loadoutCount,
+			pets = pets,
+			passAvailable = Config.get().economy.extraLoadoutsPass.passId ~= 0,
+			equip = equipItem,
+			selectLoadout = function(index: number)
+				Net.fireServer(Remotes.SelectLoadout, index)
+			end,
+			buyPass = function()
+				local pass = Config.get().economy.extraLoadoutsPass
+				if pass.passId ~= 0 then
+					MarketplaceService:PromptGamePassPurchase(player, pass.passId)
+				end
+			end,
+			setPetSkin = function(petId: number, itemId: string?)
+				Net.fireServer(Remotes.SetPetSkin, { pet = petId, item = itemId })
+			end,
+		}),
 		ClassPicker(scope, {
 			open = classOpen,
 			current = activeClass,
@@ -607,6 +721,24 @@ function UiController.start(_self: typeof(UiController))
 		end
 	end)
 	task.spawn(watchStations)
+
+	-- Shop (H) and loadout (J).
+	for _, name in { "Gold", "Owned", "Loadout", "LoadoutIndex", "LoadoutCount", "Quests", "LoginStreak" } do
+		player:GetAttributeChangedSignal(name):Connect(readEconomy)
+	end
+	readEconomy()
+	ContextActionService:BindAction("OpenShop", function(_, inputState: Enum.UserInputState)
+		if inputState == Enum.UserInputState.Begin then
+			shopOpen:set(not Fusion.peek(shopOpen))
+		end
+		return Enum.ContextActionResult.Pass
+	end, false, Enum.KeyCode.H)
+	ContextActionService:BindAction("OpenLoadout", function(_, inputState: Enum.UserInputState)
+		if inputState == Enum.UserInputState.Begin then
+			loadoutOpen:set(not Fusion.peek(loadoutOpen))
+		end
+		return Enum.ContextActionResult.Pass
+	end, false, Enum.KeyCode.J)
 
 	-- Pets: the stable list arrives as JSON in the "Pets" attribute.
 	local function readPets()

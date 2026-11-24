@@ -27,11 +27,12 @@ Working title. "Hatch a Monster" and "Monster Fighters" are the other candidates
 | 9 | Persistence, levels, and pets | Complete |
 | 10 | Classes | Complete |
 | 11 | Balance, anti-snowball, and telemetry | Complete |
-| 12 | Gold, cosmetics, and monetization | Not Started |
+| 12 | Gold, cosmetics, and monetization | Complete (Robux products in Phase 16) |
 | 13 | UX polish, onboarding, audio, and effects | Not Started |
 | 13B | Mobile and console pass | Not Started |
 | 14 | Admin panel, live ops, and anti-cheat | Not Started |
 | 15 | Soft launch and launch | Not Started |
+| 16 | Purchases go live | Not Started (after all game development) |
 
 ---
 
@@ -941,24 +942,24 @@ Added in the Phase 13B mobile and console pass: a mid-range Android phone (Galax
 
 ## Phase 12: Gold, cosmetics, and monetization
 
-**Status:** Not Started
+**Status:** Complete (Robux products and the game pass are created in Phase 16, after all game development; client render cost needs the viewport visible)
 
 **Goal:** A cosmetic economy that funds the game without affecting fairness.
 
 **Tasks**
 
-- [ ] Gold earning from play, with rates in config.
-- [ ] Cosmetic catalogue format: weapon skins, armour skins, pet skins, trails, kill effects, emotes, titles, each with rarity and price.
-- [ ] Cosmetic rendering on players and pets with a strict per-item performance budget.
-- [ ] Level milestone looks for each class (free, show real strength).
-- [ ] Shop screen: featured items, categories, preview on the player's own character, purchase flow.
-- [ ] Inventory and loadout screen.
-- [ ] Robux gold packs as developer products with an idempotent receipt handler and purchase history.
-- [ ] Game passes that do not affect power (for example, extra cosmetic loadout slots).
-- [ ] Daily login reward and daily quests paying gold.
-- [ ] Policy compliance: check regional restrictions through the platform policy service; no paid random items for restricted players; clear pricing.
-- [ ] Economy telemetry: sources and sinks of gold, conversion, revenue per user.
-- [ ] Unit tests proving no cosmetic or purchase alters the stat function or the rate or ceiling of any stat, including the XP earn rate. (There is no paid XP boost; free time-limited XP events are a Phase 14 live-ops tool.)
+- [x] Gold earning from play, with rates in config.
+- [x] Cosmetic catalogue format: weapon skins, armour skins, pet skins, trails, kill effects, emotes, titles, each with rarity and price.
+- [x] Cosmetic rendering on players and pets with a strict per-item performance budget.
+- [x] Level milestone looks for each class (free, show real strength).
+- [x] Shop screen: featured items, categories, preview on the player's own character, purchase flow.
+- [x] Inventory and loadout screen.
+- [x] Robux gold packs as developer products with an idempotent receipt handler and purchase history.
+- [x] Game passes that do not affect power (for example, extra cosmetic loadout slots).
+- [x] Daily login reward and daily quests paying gold.
+- [x] Policy compliance: check regional restrictions through the platform policy service; no paid random items for restricted players; clear pricing.
+- [x] Economy telemetry: sources and sinks of gold, conversion, revenue per user.
+- [x] Unit tests proving no cosmetic or purchase alters the stat function or the rate or ceiling of any stat, including the XP earn rate. (There is no paid XP boost; free time-limited XP events are a Phase 14 live-ops tool.)
 
 **Acceptance tests**
 
@@ -970,7 +971,50 @@ Added in the Phase 13B mobile and console pass: a mid-range Android phone (Galax
 
 **Implementation notes**
 
-_None yet._
+- **Catalogue as data** (`src/shared/Cosmetics`, format in `Types.luau`): 31 items.
+  - Weapon skins: 7 (three fit any weapon, one per weapon).
+  - Armour skins (shoulder plates): 4. Pet skins: 4. Trails: 4. Kill effects: 4. Emotes (G): 4. Titles: 3.
+  - Prices by rarity: common 250, rare 600, epic 1200, legendary 2500 gold.
+  - Items carry only looks. Tests check there are no other fields, and check the budget: at most 12 particles per second, trails up to 0.6 s and 2 studs wide.
+  - Rendering (`Shared.CosmeticLook`) adds at most two parts, one emitter and one light per item.
+- **Rules are pure** (`Shared.Economy`, tested): buying, equipping, loadout presets, which items apply to the weapon in hand, the login streak, daily quests (three per day, deterministic per player and day), the featured rotation, and the receipt ledger.
+- **Gold from play** (`Config.economy.gold`): win 100, loss 80, player kill 5, assist 3, guardian 20 (attacking team nearby), camp clear 10, Warden 40, hatched egg 10. Daily login: 50 rising by 25 a day to 200 over a 7-day streak. Quests pay 100 to 150. A common item costs about three rounds.
+- **Loadouts:** one free preset, three with the game pass. Each holds weapon skin, armour, trail, kill effect, emote and title; pet skins are set per pet. Weapon skins made for one weapon only show while using it.
+- **Rendering:**
+  - The server puts worn cosmetics on characters (`CosmeticService`) on spawn, on class or weapon change, and on equip.
+  - Kill effects and emotes go to nearby clients (`KillEffect`, `EmotePlayed`).
+  - Bought titles replace the account title on the nameplate.
+  - Pet skins recolour the pet (a `tint` on the NPC spawn event).
+  - Shop preview uses the same `CosmeticLook` code locally for 6 s; the worn weapon look comes back afterwards.
+- **UI:**
+  - Shop (H): featured, seven category tabs, gold packs, and daily login and quests.
+  - Loadout (J): presets, a row per slot cycling owned items, and pet skins.
+  - Gold on the HUD, with shop and loadout buttons.
+- **Robux:**
+  - `PurchaseService.process` grants a gold pack only if the buyer's profile is loaded here, records the receipt ID in the profile (last 100) and purchase history (last 50), and reports PurchaseGranted only after the save succeeds.
+  - Gold packs (proposed): 500 for R$49, 1200 for R$99, 2600 for R$199, 7000 for R$499. The extra loadouts pass is proposed at R$99.
+  - Product and pass IDs are 0 (not created yet: hidden from the shop) until approved and created on Roblox.
+  - Studio has a dev-only pack (product 1, 100 gold) for `/receipt`.
+- **Policy:** `PolicyService` is checked per player (`PaidRandomItemsRestricted` kept). Nothing sold is random, and nothing can be traded. Prices show before buying (gold on cards, Robux on packs and the pass).
+- **Economy telemetry:** every gold source and sink goes to `AnalyticsService:LogEconomyEvent` ("Gold", with transaction type and SKU); Robux packs are logged as IAP. Conversion and revenue per user come from the Roblox Economy dashboard. Not recorded from Studio.
+- **Acceptance, exactly once** (Studio, real `dev_` profile store):
+  - The receipt granted +100 gold, and an immediate retry granted nothing.
+  - A receipt for a buyer not in the server was NotProcessedYet.
+  - After leaving and rejoining (profile saved and reloaded), the same receipt came back as PurchaseGranted with no gold added (8450 stayed 8450), and a new receipt granted +100.
+- **Acceptance, all four classes:** with Royal (any weapon), Dragon Plates and Flame Trail worn, each class showed a reskinned weapon (2 parts recoloured), 2 shoulder plates and a trail. The emote, kill effect (on a class bot) and pet skin all reached the client. Not yet checked by eye or on the low-end PC with the viewport rendering.
+- **Acceptance, identical stats:** unit test. A profile owning and wearing everything, with a skinned pet, has the same health, damage, defence and power at levels 1, 20 and 500 for every class, gains the same XP from the same award, and has the same power as a bare one.
+- **Performance gate (approximated low-end PC, 2 cores, graphics level 1, restored afterwards):** 40 R15 rigs in the heaviest cosmetics walking in circles, plus the full regression load with the round aged 16 minutes.
+  - Heaviest cosmetics: Star Staff or Royal, Dragon Plates, Void Trail.
+  - Cosmetics on the rigs: 800 parts, 50 emitters, 40 trails, 80 lights.
+  - Regression load: 918 minions, 209 NPCs, 117 monsters.
+  - Server held 60 Hz (p99 19.1 ms); client simulation 60 Hz; send 28.1 KB/s.
+  - The same isolated server hitch as Phase 11 appeared once.
+  - The client render cost was not measured: the Studio viewport was not rendering. Rerun it with the viewport visible.
+- **Carried forward:**
+  - The products and pass are created in Phase 16, after all game development (owner decision).
+  - Real cosmetic art (Phase 13).
+  - Blocky-shaped pets ignore skins: only placeholder shapes with a look take the tint.
+  - Render check by eye and on the low-end PC.
 
 ---
 
@@ -1119,6 +1163,32 @@ _None yet._
 
 ---
 
+## Phase 16: Purchases go live
+
+**Status:** Not Started (owner decision: after all game development)
+
+**Goal:** Turn on Robux purchases once the game is finished, using the purchase code built in Phase 12.
+
+**Tasks**
+
+- [ ] Confirm the products and prices (proposed in Phase 12): gold packs of 500, 1200, 2600 and 7000 gold for R$49, 99, 199 and 499; an extra loadouts game pass for R$99.
+- [ ] Grant the Open Cloud permissions (developer products and game passes, read and write), or create the products in the Creator Dashboard.
+- [ ] Create the developer products and the game pass (they cannot be deleted), with icons.
+- [ ] Put their IDs in `Config.economy` (`goldPacks[].productId`, `extraLoadoutsPass.passId`); the shop shows them as soon as the IDs are set.
+- [ ] Test a real purchase of each in the published experience, including a disconnect before the grant (granted exactly once on rejoin).
+- [ ] Check the Economy dashboard records Robux purchases (IAP) and gold sources and sinks.
+
+**Acceptance tests**
+
+- Each gold pack and the game pass can be bought, and each purchase is granted exactly once.
+- No purchase changes stats, XP rates or ceilings (the Phase 12 unit tests still pass).
+
+**Implementation notes**
+
+_None yet._
+
+---
+
 ## Appendix A: Progression and fairness maths (starting values)
 
 All constants live in config and are expected to change in Phase 11.
@@ -1210,3 +1280,7 @@ Record decisions here as they are made, with the date and the reason.
 | 2026-11-23 | The round payout replaces the flat win/loss XP | Contribution, closeness, length and staying now matter; losers still get 80% |
 | 2026-11-23 | Telemetry's custom sink is a DataStore of compact round records (last 200), one write per round | No external service needed; enough for the balance dashboard; within DataStore budgets |
 | 2026-11-23 | The round simulator models skill as a hidden per-round factor and fights as power squared | Without skill, power alone decided rounds; without power squared, power barely mattered |
+| 2026-11-23 | Robux receipts are recorded in the player's own profile (last 100 IDs) and reported granted only after the profile save succeeds | Exactly-once with the existing session lock; no second data store to keep consistent |
+| 2026-11-23 | Products are configured by ID and hidden until created (ID 0); proposed prices: gold packs 500/1200/2600/7000 for R$49/99/199/499, extra loadouts pass R$99 | Creating real products is outward-facing and needs owner approval |
+| 2026-11-23 | Nothing sold is random and nothing is tradable | Simplest policy compliance in every region |
+| 2026-11-23 | Robux products and the game pass are created in a final milestone (Phase 16), after all game development | Owner decision; the purchase code stays in place, hidden while product IDs are 0 |

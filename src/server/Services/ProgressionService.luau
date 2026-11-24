@@ -133,6 +133,7 @@ local function petsJson(data: Profile.Data): string
 			xp = math.floor(pet.xp),
 			multiplier = math.floor(Progression.petMultiplier(pet.xp, config()) * 1000 + 0.5) / 1000,
 			active = pet.id == data.activePet,
+			skin = pet.cosmetic,
 		})
 	end
 	return HttpService:JSONEncode(list)

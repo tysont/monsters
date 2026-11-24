@@ -7,6 +7,7 @@
 local Environment = require("@self/Environment")
 local Balance = require("./Balance")
 local Classes = require("./Classes")
+local Economy = require("./Economy")
 local Monsters = require("./Monsters")
 
 export type Environment = Environment.Environment
@@ -70,6 +71,8 @@ export type Config = {
 	-- Phase 11 balance: equalisers, escalation, comeback help, underdog, bounties, payout,
 	-- idle detection and the jungle boss (rules in Shared.Balance).
 	balance: Balance.BalanceConfig,
+	-- Phase 12: gold rates, daily rewards and quests, loadouts, Robux products (Shared.Economy).
+	economy: Economy.EconomyConfig,
 }
 
 -- Monster definitions live in Shared.Monsters (one file per type); these are re-exported here.
@@ -571,6 +574,66 @@ local function base(environment: Environment): Config
 			maxApex = 120,
 			cooldownSeconds = 1,
 		},
+		economy = {
+			gold = {
+				roundWin = 100,
+				roundLoss = 80,
+				kill = 5,
+				assist = 3,
+				structure = 20,
+				campClear = 10,
+				boss = 40,
+				eggHatched = 10,
+			},
+			daily = {
+				loginBase = 50,
+				loginPerDay = 25,
+				loginMax = 200,
+				streakDays = 7,
+				questCount = 3,
+				quests = {
+					{ id = "win", text = "Win a round", stat = "wins", target = 1, gold = 150 },
+					{ id = "rounds", text = "Play 2 rounds to the end", stat = "rounds", target = 2, gold = 100 },
+					{ id = "kills", text = "Defeat 5 players", stat = "kills", target = 5, gold = 120 },
+					{
+						id = "minions",
+						text = "Be there for 40 minion defeats",
+						stat = "minions",
+						target = 40,
+						gold = 100,
+					},
+					{ id = "camps", text = "Clear 3 jungle camps", stat = "camps", target = 3, gold = 120 },
+					{
+						id = "structures",
+						text = "Help destroy 2 guardians",
+						stat = "structures",
+						target = 2,
+						gold = 150,
+					},
+					{ id = "eggs", text = "Hatch an egg", stat = "eggs", target = 1, gold = 100 },
+					{
+						id = "support",
+						text = "Heal or shield allies for 1500",
+						stat = "support",
+						target = 1500,
+						gold = 120,
+					},
+					{ id = "damage", text = "Deal 8000 damage", stat = "damage", target = 8000, gold = 100 },
+				},
+			},
+			loadouts = { free = 1, withPass = 3 },
+			featuredCount = 4,
+			receiptHistory = 100,
+			purchaseHistory = 50,
+			-- Product IDs are 0 until the products exist on Roblox (hidden from the shop until then).
+			goldPacks = {
+				{ id = "gold500", productId = 0, gold = 500, robux = 49 },
+				{ id = "gold1200", productId = 0, gold = 1200, robux = 99 },
+				{ id = "gold2600", productId = 0, gold = 2600, robux = 199 },
+				{ id = "gold7000", productId = 0, gold = 7000, robux = 499 },
+			},
+			extraLoadoutsPass = { passId = 0, robux = 99 },
+		},
 		balance = {
 			equaliser = {
 				gapForFull = 0.4,
@@ -620,7 +683,10 @@ end
 
 -- Per-environment adjustments applied on top of `base`.
 local overrides: { [Environment]: (config: Config) -> () } = {
-	dev = function(_config: Config) end,
+	dev = function(config: Config)
+		-- A Studio-only gold pack (product 1) so the receipt handler can be exercised with /receipt.
+		table.insert(config.economy.goldPacks, { id = "devtest", productId = 1, gold = 100, robux = 0 })
+	end,
 	test = function(config: Config)
 		config.data.storePrefix = "test_"
 		config.net.logViolations = false
