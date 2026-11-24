@@ -19,10 +19,12 @@ local Damage = require(ReplicatedStorage.Shared.Combat.Damage)
 local History = require(ReplicatedStorage.Shared.Combat.History)
 local Map = require(ReplicatedStorage.Shared.Map)
 local Melee = require(ReplicatedStorage.Shared.Combat.Melee)
+local Minions = require(ReplicatedStorage.Shared.Combat.Minions)
 local Net = require(ReplicatedStorage.Shared.Net)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Round = require(ReplicatedStorage.Shared.Round)
 local Signal = require(ReplicatedStorage.Shared.Signal)
+local SpatialGrid = require(ReplicatedStorage.Shared.Combat.SpatialGrid)
 local Stats = require(ReplicatedStorage.Shared.Combat.Stats)
 local Tuning = require(ReplicatedStorage.Shared.Combat.Tuning)
 
@@ -37,10 +39,16 @@ local REGEN_INTERVAL = 0.5
 -- Clients farther than this from a hit do not receive it (they cannot see it).
 local HIT_BROADCAST_RANGE = 250
 local PLAYER_RADIUS = 1.5
+-- Spatial grid cell size; queries visit the cells overlapping a circle.
+local GRID_CELL = 16
+-- Largest body radius among combatants, added to grid query radii.
+local MAX_RADIUS = 5
+-- How far a target can move during the maximum rewind (added to melee query radius).
+local REWIND_SLACK = 6
 
 export type Entry = {
 	combatant: Damage.Combatant,
-	kind: "player" | "npc",
+	kind: "player" | "npc" | "minion",
 	player: Player?,
 	-- Body radius for hit tests.
 	radius: number,
@@ -53,24 +61,45 @@ export type Entry = {
 	lastDodgeAt: number?,
 	-- NPC hook: called after this combatant takes a hit.
 	onHit: ((result: Damage.Result, knockback: Vector3) -> ())?,
+	-- Whether this combatant's defeat goes to every client's kill feed (false for minions).
+	announceKills: boolean?,
+	-- Whether defeating it counts towards team kills (false for minions and structures).
+	scoresKill: boolean?,
+	-- Lane gating: true while this structure cannot be damaged yet. Gated combatants are skipped
+	-- when choosing targets.
+	gated: boolean?,
+	-- Multiplier on damage taken (a monster's stagger window), 1 or nil for none.
+	vulnerability: number?,
+	-- Multiplier on damage taken from a given source, e.g. 0 from the front of an armoured
+	-- monster.
+	damageFilter: ((source: Entry?) -> number)?,
 }
 
 local CombatService = {
 	name = "CombatService",
 	dependencies = { "TeamService", "CharacterService", "RoundService" },
-	-- (victimId, killerId, assistIds)
-	killed = Signal.new() :: Signal.Signal<number, number, { number }>,
+	-- (victimId, killerId, assistIds, victim)
+	killed = Signal.new() :: Signal.Signal<number, number, { number }, Entry>,
 	-- (targetId, sourceId, amount)
 	damaged = Signal.new() :: Signal.Signal<number, number, number>,
+	-- (player, kind, amount): proximity credit, e.g. a nearby minion died. XP from Phase 9,
+	-- gold from Phase 12.
+	credited = Signal.new() :: Signal.Signal<Player, string, number>,
 	-- Class level of a player for the stat function. Phase 9 replaces this with real levels.
 	classLevelOf = function(_player: Player): number
 		return 1
+	end,
+	-- Whether a player may dodge right now (EggService: egg carriers cannot).
+	canDodge = function(_player: Player): boolean
+		return true
 	end,
 	-- Folders whose parts block line of sight for melee (map walls, gym walls).
 	losBlockers = {} :: { Instance },
 }
 
 local entries: { [number]: Entry } = {}
+-- Every registered combatant by position, refreshed at HISTORY_HZ.
+local grid = SpatialGrid.new(GRID_CELL)
 local losParams = RaycastParams.new()
 losParams.FilterType = Enum.RaycastFilterType.Include
 
@@ -95,11 +124,50 @@ function CombatService.register(entry: Entry)
 	local p = entry.position()
 	if p then
 		History.record(entry.history, now(), p.X, p.Y, p.Z)
+		SpatialGrid.update(grid, entry.combatant.id, p.X, p.Z)
 	end
 end
 
 function CombatService.unregister(id: number)
 	entries[id] = nil
+	SpatialGrid.remove(grid, id)
+end
+
+-- Moves a combatant in the spatial grid now (callers that teleport or spawn mid-tick).
+function CombatService.moved(entry: Entry)
+	local p = entry.position()
+	if p then
+		SpatialGrid.update(grid, entry.combatant.id, p.X, p.Z)
+	end
+end
+
+-- Calls `visit(entry)` for every combatant in grid cells overlapping the circle (any team, not
+-- distance-checked). For cheap neighbourhood work such as minion spacing.
+function CombatService.allNear(x: number, z: number, range: number, visit: (Entry) -> ())
+	SpatialGrid.query(grid, x, z, range, function(id)
+		local entry = entries[id]
+		if entry then
+			visit(entry)
+		end
+	end)
+end
+
+-- Calls `visit(entry, distance)` for each living combatant hostile to `team` within `range` of
+-- (x, z), using the spatial grid. Distance is to the combatant's centre.
+function CombatService.hostilesNear(team: number?, x: number, z: number, range: number, visit: (Entry, number) -> ())
+	SpatialGrid.query(grid, x, z, range + MAX_RADIUS, function(id)
+		local entry = entries[id]
+		if entry and entry.combatant.alive and Damage.hostile(team, entry.combatant.team) then
+			local p = entry.position()
+			if p then
+				local dx, dz = p.X - x, p.Z - z
+				local d = math.sqrt(dx * dx + dz * dz)
+				if d <= range + entry.radius then
+					visit(entry, d)
+				end
+			end
+		end
+	end)
 end
 
 function CombatService.newHistory(): History.History
@@ -135,6 +203,47 @@ local function addUnique(list: { Player }, player: Player?)
 	end
 end
 
+-- Heavy knockback is simulated by the target's own client (it owns its character). The server
+-- remembers where the target was and, once the knockdown is over, pulls the character back if it
+-- ended farther away than the push plus walking could explain.
+type KnockbackCheck = { from: Vector3, checkAt: number, allowed: number }
+local knockbackChecks: { [Entry]: KnockbackCheck } = {}
+local KNOCKDOWN_SECONDS = 1.2
+
+local function watchKnockback(target: Entry, push: Vector3)
+	local p = target.position()
+	if p == nil then
+		return
+	end
+	local existing = knockbackChecks[target]
+	knockbackChecks[target] = {
+		from = if existing then existing.from else p,
+		checkAt = now() + KNOCKDOWN_SECONDS,
+		allowed = (if existing then existing.allowed else 0)
+			+ push.Magnitude * 0.45
+			+ Map.get().walkSpeed * KNOCKDOWN_SECONDS * 1.5
+			+ 4,
+	}
+end
+
+local function validateKnockbacks(t: number)
+	for entry, check in knockbackChecks do
+		if t >= check.checkAt then
+			knockbackChecks[entry] = nil
+			local p = entry.position()
+			local character = entry.player and entry.player.Character
+			if p and character and entry.combatant.alive then
+				local offset = Vector3.new(p.X - check.from.X, 0, p.Z - check.from.Z)
+				if offset.Magnitude > check.allowed then
+					local fixed = check.from + offset.Unit * check.allowed
+					character:PivotTo(CFrame.new(fixed.X, p.Y, fixed.Z) * character:GetPivot().Rotation)
+					warn(`[Combat] knockback end position corrected for {character.Name}`)
+				end
+			end
+		end
+	end
+end
+
 -- Applies one hit through the damage pipeline and tells clients about it.
 function CombatService.applyHit(
 	sourceId: number,
@@ -142,7 +251,8 @@ function CombatService.applyHit(
 	amount: number,
 	kind: string,
 	knockback: Vector3?,
-	at: number?
+	at: number?,
+	heavy: boolean?
 ): Damage.Result?
 	local target = entries[targetId]
 	if target == nil then
@@ -162,6 +272,10 @@ function CombatService.applyHit(
 		amount = amount,
 		kind = kind,
 		now = at or now(),
+		modifiers = {
+			target.vulnerability or 1,
+			if target.damageFilter then target.damageFilter(source) else 1,
+		},
 	}, config().assistWindow)
 	if not result.applied then
 		return result
@@ -174,31 +288,48 @@ function CombatService.applyHit(
 		if humanoid then
 			humanoid.Health = target.combatant.health
 		end
+		if heavy and not result.killed then
+			watchKnockback(target, push)
+		end
 	end
 	if target.onHit then
 		target.onHit(result, push)
 	end
 	CombatService.damaged:fire(targetId, sourceId, result.amount)
 
-	local position = target.position() or Vector3.zero
-	local recipients = playersNear(position, HIT_BROADCAST_RANGE)
-	addUnique(recipients, target.player)
-	addUnique(recipients, source and source.player)
-	Net.fireClients(Remotes.CombatHit, recipients, {
-		target = targetId,
-		source = sourceId,
-		amount = result.amount,
-		position = position,
-		knockback = push,
-		killed = result.killed,
-	})
+	-- Minion-on-minion hits send no event: health shows through snapshots, and damage numbers
+	-- for every minion scuffle would be clutter and bandwidth.
+	local minionOnly = target.kind == "minion" and (source == nil or source.kind == "minion")
+	if not minionOnly then
+		local position = target.position() or Vector3.zero
+		local recipients = playersNear(position, HIT_BROADCAST_RANGE)
+		addUnique(recipients, target.player)
+		addUnique(recipients, source and source.player)
+		Net.fireClients(Remotes.CombatHit, recipients, {
+			target = targetId,
+			source = sourceId,
+			amount = result.amount,
+			position = position,
+			knockback = push,
+			killed = result.killed,
+			heavy = heavy == true,
+		})
+	end
 
 	if result.killed then
 		CombatService.unregister(targetId)
-		Net.fireAllClients(Remotes.CombatKill, { killer = sourceId, victim = targetId, assists = result.assists })
-		CombatService.killed:fire(targetId, sourceId, result.assists)
+		if target.announceKills ~= false then
+			Net.fireAllClients(Remotes.CombatKill, { killer = sourceId, victim = targetId, assists = result.assists })
+		end
+		CombatService.killed:fire(targetId, sourceId, result.assists, target)
 	end
 	return result
+end
+
+-- Starts a dodge for `entry` at `startedAt`: invulnerable for the tuned window. Players and bots.
+function CombatService.dodge(entry: Entry, startedAt: number)
+	entry.lastDodgeAt = startedAt
+	entry.combatant.invulnerableUntil = startedAt + Tuning.get("iframes")
 end
 
 -- Resolves a melee swing from `attacker` facing `direction`, rewinding targets by `rewind`
@@ -210,9 +341,13 @@ function CombatService.meleeSwing(attacker: Entry, direction: Vector3, rewind: n
 	end
 	local candidates: { Melee.Candidate } = {}
 	local positions: { [number]: Vector3 } = {}
-	for id, entry in entries do
+	local tolerance = if attacker.kind == "player" then config().rangeTolerance else 0
+	local reach = Tuning.get("attackRange") + tolerance + MAX_RADIUS + REWIND_SLACK
+	SpatialGrid.query(grid, origin.X, origin.Z, reach, function(id)
+		local entry = entries[id]
 		if
-			id ~= attacker.combatant.id
+			entry
+			and id ~= attacker.combatant.id
 			and entry.combatant.alive
 			and Damage.hostile(attacker.combatant.team, entry.combatant.team)
 		then
@@ -223,8 +358,7 @@ function CombatService.meleeSwing(attacker: Entry, direction: Vector3, rewind: n
 				table.insert(candidates, { id = id, position = { x = p.X, z = p.Z }, radius = entry.radius })
 			end
 		end
-	end
-	local tolerance = if attacker.kind == "player" then config().rangeTolerance else 0
+	end)
 	local ids = Melee.selectTargets({ x = origin.X, z = origin.Z }, { x = direction.X, z = direction.Z }, candidates, {
 		range = Tuning.get("attackRange") + tolerance,
 		arc = Tuning.get("attackArc"),
@@ -245,25 +379,39 @@ function CombatService.meleeSwing(attacker: Entry, direction: Vector3, rewind: n
 	return hit
 end
 
--- Damages every hostile within `radius` of `center` (monster area attacks). Positions are read
--- now; invulnerability is judged at `at` (the impact time).
-function CombatService.areaHit(source: Entry, center: Vector3, radius: number, amount: number, at: number): { number }
+-- Damages every hostile to `source` whose body passes `test(x, z, radius)`, searching within
+-- `bound` of (cx, cz). Knockback pushes away from (cx, cz), or along `pushDirection` if given.
+-- Used by monster attack shapes (circles and cones). Invulnerability is judged at `at`.
+function CombatService.shapeHit(
+	source: Entry,
+	cx: number,
+	cz: number,
+	bound: number,
+	test: (x: number, z: number, radius: number) -> boolean,
+	amount: number,
+	knockback: number,
+	heavy: boolean,
+	at: number,
+	pushDirection: Vector3?
+): { number }
+	local targets: { { entry: Entry, push: Vector3 } } = {}
+	CombatService.hostilesNear(source.combatant.team, cx, cz, bound, function(entry)
+		if entry.gated or entry == source then
+			return
+		end
+		local p = entry.position() :: Vector3
+		if test(p.X, p.Z, entry.radius) then
+			local away = pushDirection or Vector3.new(p.X - cx, 0, p.Z - cz)
+			local push = if away.Magnitude > 1e-3 then away.Unit * knockback else Vector3.zero
+			table.insert(targets, { entry = entry, push = push })
+		end
+	end)
 	local hit: { number } = {}
-	for id, entry in entries do
-		if entry.combatant.alive and Damage.hostile(source.combatant.team, entry.combatant.team) then
-			local p = entry.position()
-			if p then
-				local away = Vector3.new(p.X - center.X, 0, p.Z - center.Z)
-				if away.Magnitude - entry.radius <= radius then
-					local push = if away.Magnitude > 1e-3
-						then away.Unit * Tuning.get("knockback") * 1.5
-						else Vector3.zero
-					local result = CombatService.applyHit(source.combatant.id, id, amount, "area", push, at)
-					if result and result.applied then
-						table.insert(hit, id)
-					end
-				end
-			end
+	for _, t in targets do
+		local id = t.entry.combatant.id
+		local result = CombatService.applyHit(source.combatant.id, id, amount, "monster", t.push, at, heavy)
+		if result and result.applied then
+			table.insert(hit, id)
 		end
 	end
 	return hit
@@ -276,21 +424,14 @@ function CombatService.nearestHostile(entry: Entry, range: number): (Entry?, num
 		return nil, math.huge
 	end
 	local best: Entry? = nil
-	local bestDistance = range
-	for id, other in entries do
-		if
-			id ~= entry.combatant.id
-			and other.combatant.alive
-			and Damage.hostile(entry.combatant.team, other.combatant.team)
-		then
-			local p = other.position()
-			if p then
-				local d = Vector3.new(p.X - origin.X, 0, p.Z - origin.Z).Magnitude
-				if d <= bestDistance then
-					best, bestDistance = other, d
-				end
-			end
+	local bestDistance = math.huge
+	CombatService.hostilesNear(entry.combatant.team, origin.X, origin.Z, range, function(other, d)
+		if other ~= entry and not other.gated and d < bestDistance then
+			best, bestDistance = other, d
 		end
+	end)
+	if best == nil then
+		return nil, math.huge
 	end
 	return best, bestDistance
 end
@@ -336,7 +477,9 @@ local function onCharacterSpawned(player: Player, character: Model)
 		healthScript:Destroy()
 	end
 
-	local stats = Stats.compute(config().knight, CombatService.classLevelOf(player))
+	local level = CombatService.classLevelOf(player)
+	player:SetAttribute("ClassLevel", level)
+	local stats = Stats.compute(config().knight, level)
 	humanoid.MaxHealth = stats.maxHealth
 	humanoid.Health = stats.maxHealth
 	attachSword(character)
@@ -369,7 +512,7 @@ end
 
 local function onAttack(player: Player, request: Remotes.AttackRequest)
 	local entry = entries[player.UserId]
-	if entry == nil or not entry.combatant.alive or not inputAllowed() then
+	if entry == nil or not entry.combatant.alive or not inputAllowed() or player:GetAttribute("Launching") then
 		return
 	end
 	local t = now()
@@ -396,18 +539,21 @@ local function onAttack(player: Player, request: Remotes.AttackRequest)
 end
 
 local function onDodge(player: Player)
+	if not CombatService.canDodge(player) then
+		return
+	end
 	local entry = entries[player.UserId]
-	if entry == nil or not entry.combatant.alive or not inputAllowed() then
+	if entry == nil or not entry.combatant.alive or not inputAllowed() or player:GetAttribute("Launching") then
 		return
 	end
 	local t = now()
 	if not Melee.cooldownReady(entry.lastDodgeAt, t, Tuning.get("dodgeCooldown"), config().cooldownTolerance) then
 		return
 	end
-	entry.lastDodgeAt = t
 	-- The dodge started on the client about half a ping before it arrived here.
 	local started = t - math.clamp(player:GetNetworkPing() / 2, 0, config().maxRewind)
-	entry.combatant.invulnerableUntil = started + Tuning.get("iframes")
+	CombatService.dodge(entry, started)
+	entry.lastDodgeAt = t
 end
 
 -- Regeneration and history ------------------------------------------------------------------
@@ -454,11 +600,38 @@ function CombatService.init(_self: typeof(CombatService))
 	folder.Parent = ReplicatedStorage
 
 	CharacterService.characterSpawned:connect(onCharacterSpawned)
+
+	-- Team kill counts for the HUD score strip (players and bots only, not minions), reset each
+	-- round.
+	CombatService.killed:connect(function(victimId: number, killerId: number, _assists: { number }, victim: Entry)
+		if Minions.networkId(victimId) ~= nil or victim.scoresKill == false then
+			return
+		end
+		local killer = entries[killerId]
+		if killer == nil or killer.scoresKill == false then
+			-- Kills by guardians, Titans and other monsters do not score for a team.
+			return
+		end
+		local team = killer.combatant.team
+		if team then
+			local instance = TeamService.teamInstance(team)
+			instance:SetAttribute("Kills", ((instance:GetAttribute("Kills") :: number?) or 0) + 1)
+		end
+	end)
+	RoundService.roundReset:connect(function()
+		for team = 1, 2 do
+			TeamService.teamInstance(team):SetAttribute("Kills", 0)
+		end
+	end)
 	Net.onServerEvent(Remotes.CombatAttack, onAttack)
 	Net.onServerEvent(Remotes.CombatDodge, function(player: Player)
 		onDodge(player)
 	end)
 	Players.PlayerRemoving:Connect(function(player: Player)
+		local entry = entries[player.UserId]
+		if entry then
+			knockbackChecks[entry] = nil
+		end
 		CombatService.unregister(player.UserId)
 	end)
 
@@ -470,10 +643,12 @@ function CombatService.init(_self: typeof(CombatService))
 		end
 		sinceSample = 0
 		local t = now()
+		validateKnockbacks(t)
 		for _, entry in entries do
 			local p = entry.position()
 			if p then
 				History.record(entry.history, t, p.X, p.Y, p.Z)
+				SpatialGrid.update(grid, entry.combatant.id, p.X, p.Z)
 			end
 		end
 	end)

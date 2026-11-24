@@ -43,7 +43,18 @@ time; tick tasks and record decisions and surprises under each phase's Implement
   yield; `start` runs in its own thread. Started by `Shared.Loader`.
 - **Remotes:** define every remote in `src/shared/Remotes.luau` and use it through `Shared.Net`.
   Every client-to-server remote has a `Guard` check; never use RemoteEvents directly.
-- **Config:** tunable numbers go in `src/shared/Config`, read with `Config.get()`.
+- **Config:** tunable numbers go in `src/shared/Config`, read with `Config.get()`. Monster types are
+  data: one definition file per type in `src/shared/Monsters` (format in `Types.luau`), listed in
+  its `init.luau`.
+- **UI:** Fusion 0.3 (`ReplicatedStorage.Packages.Fusion`). Colours, sizes and motion come from
+  `src/client/UI/Theme.luau`; reusable pieces live in `UI/Components`, screens in `UI/Screens`.
+  Design in points at 1600 x 900 and mount screens with `Layout.screen` (scaling and safe area).
+  Use `Motion.spring` (respects reduced motion). Never create instances per frame: update
+  values only when they change and pool repeated elements. Escape belongs to Roblox; dialogs
+  close with Backspace, B or their close button.
+- **Packages:** add Wally dependencies to `wally.toml`, then `make packages` (runs
+  `scripts/package-types.luau` so luau-lsp sees package types). Rojo only picks up a newly
+  created `Packages` folder after a restart, then the Studio plugin must reconnect.
 - **Tests:** `tests/**/*.spec.luau`, run under Lune. Keep logic you want tested in shared modules
   that don't touch the engine when required, and inject `task`/clock/engine dependencies.
 

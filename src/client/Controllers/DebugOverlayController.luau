@@ -16,6 +16,8 @@ local Net = require(ReplicatedStorage.Shared.Net)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 
 local DevToolsController = require("./DevToolsController")
+local MinionRenderController = require("./MinionRenderController")
+local UiController = require("./UiController")
 
 local TOGGLE_KEY = Enum.KeyCode.F2
 local REFRESH_SECONDS = 0.5
@@ -24,7 +26,7 @@ local SERVER_STALE_SECONDS = 3
 
 local DebugOverlayController = {
 	name = "DebugOverlayController",
-	dependencies = { "DevToolsController" },
+	dependencies = { "DevToolsController", "UiController", "MinionRenderController" },
 }
 
 local enabled = false
@@ -49,6 +51,8 @@ local function buildGui(): TextButton
 	local button = Instance.new("TextButton")
 	button.Name = "Panel"
 	button.AutoButtonColor = false
+	-- Not a keyboard/gamepad navigation target.
+	button.Selectable = false
 	button.AutomaticSize = Enum.AutomaticSize.XY
 	button.Size = UDim2.fromOffset(0, 0)
 	button.Position = UDim2.fromOffset(8, 8)
@@ -115,10 +119,13 @@ local function render()
 		table.insert(lines, `net     in {s.receiveKBps}  out {s.sendKBps} KB/s`)
 		table.insert(lines, `memory  {s.memoryMb} MB   inst {s.instances}`)
 		table.insert(lines, `players {s.players}`)
-		table.insert(lines, `sim     {s.simMs} ms/frame (NPCs)`)
+		table.insert(lines, `sim     {s.simMs} ms/frame (NPCs + minions)`)
 	else
 		table.insert(lines, "-- server: no data --")
 	end
+	table.insert(lines, `ui      {format(UiController.averageCostMs, 3)} ms/frame (HUD updates)`)
+	local m = MinionRenderController.stats
+	table.insert(lines, `minions {m.minions} known  {m.full} full  {m.simple} simple`)
 	table.insert(lines, "-- dev --")
 	table.insert(lines, DevToolsController.describe())
 	table.insert(lines, if UserInputService.KeyboardEnabled then "[F2] collapse" else "[tap] collapse")

@@ -5,10 +5,11 @@
 -- at most `maxBytes` (keep it at 900 for headroom). Each chunk is self-contained:
 --
 --   header   f64 server time, u16 entity count                       (10 bytes)
---   entity   u16 id, i16 x, i16 z, u8 yaw, u8 health, u8 state         (9 bytes)
+--   entity   u16 id, i16 x, i16 z, u8 yaw, u8 health, u8 state, u8 aux (10 bytes)
 --
 -- Positions are fixed point (1/16 stud, range about +/-2047 studs); yaw is in 1/256 turns;
--- health is a fraction of max in 1/255 steps; state is an NPC-defined code.
+-- health is a fraction of max in 1/255 steps; state is an NPC-defined code; aux is an extra
+-- 0 to 1 value in 1/255 steps (a monster's stagger bar).
 
 export type Entity = {
 	id: number,
@@ -19,10 +20,12 @@ export type Entity = {
 	-- 0 to 1.
 	health: number,
 	state: number,
+	-- 0 to 1; optional, 0 when absent.
+	aux: number?,
 }
 
 local HEADER_BYTES = 10
-local ENTITY_BYTES = 9
+local ENTITY_BYTES = 10
 local POSITION_SCALE = 16
 local TAU = 2 * math.pi
 
@@ -38,6 +41,9 @@ NpcCodec.States = table.freeze({
 	attack = 2,
 	telegraph = 3,
 	recover = 4,
+	stagger = 5,
+	-- Underground (burrowing monsters): not drawn.
+	hidden = 6,
 })
 
 local function toFixed(v: number): number
@@ -64,6 +70,7 @@ function NpcCodec.pack(time: number, entities: { Entity }, maxBytes: number): { 
 			buffer.writeu8(b, o + 6, math.floor((e.yaw % TAU) / TAU * 256 + 0.5) % 256)
 			buffer.writeu8(b, o + 7, math.clamp(math.floor(e.health * 255 + 0.5), 0, 255))
 			buffer.writeu8(b, o + 8, math.clamp(e.state, 0, 255))
+			buffer.writeu8(b, o + 9, math.clamp(math.floor((e.aux or 0) * 255 + 0.5), 0, 255))
 		end
 		table.insert(chunks, b)
 		index += count
@@ -92,6 +99,7 @@ function NpcCodec.unpack(b: buffer): (number?, { Entity }?)
 			yaw = buffer.readu8(b, o + 6) / 256 * TAU,
 			health = buffer.readu8(b, o + 7) / 255,
 			state = buffer.readu8(b, o + 8),
+			aux = buffer.readu8(b, o + 9) / 255,
 		}
 	end
 	return time, entities

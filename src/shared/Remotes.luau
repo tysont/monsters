@@ -33,6 +33,8 @@ export type HitEvent = {
 	-- Velocity to apply to the target (studs per second), zero for none.
 	knockback: Vector3,
 	killed: boolean,
+	-- Heavy hits (big monster attacks) knock the target down.
+	heavy: boolean,
 }
 
 export type KillEvent = {
@@ -48,15 +50,99 @@ export type NpcSpawnEvent = {
 	team: number?,
 	maxHealth: number,
 	radius: number,
+	-- Body size multiplier (pets are smaller); nil for 1.
+	scale: number?,
 }
 
-export type NpcActionEvent = {
+-- A monster attack for clients to draw. Times are server time.
+--   telegraph   draw `shape` filling from startsAt to endsAt
+--   impact      the attack landed (effects); for projectiles see "projectile"
+--   projectile  `count` bolts leave (x, z) at startsAt, fanned `spread` degrees around (dx, dz),
+--               flying `reach` studs at `speed`
+--   phase       the monster entered phase `value`
+--   stagger     the monster is staggered until endsAt
+export type MonsterActionEvent = {
+	-- NPC ID.
 	id: number,
 	action: string,
+	-- "circle" (x, z, radius), "cone" (x, z, dx, dz, reach, arc) or "line" (x, z, dx, dz, reach,
+	-- radius as half-width, count and spread for fans).
+	shape: string,
 	x: number,
 	z: number,
+	dx: number,
+	dz: number,
 	radius: number,
+	reach: number,
+	arc: number,
+	count: number,
+	spread: number,
+	speed: number,
+	startsAt: number,
+	endsAt: number,
+	value: number,
+}
+
+export type HatchReadyEvent = {
+	egg: number,
+	kind: string,
+	rarity: string,
+	hatchery: string,
+	expiresAt: number,
+}
+
+export type LevelUpEvent = {
+	level: number,
+	class: string,
+}
+
+export type HatchChoiceRequest = {
+	egg: number,
+	choice: string,
+	target: number?,
+}
+
+export type RaidAlertEvent = {
+	hatchery: string,
+	lane: string,
+	raider: string,
+}
+
+-- A launch pad flight for the local player to fly (the server picked the landing spot).
+export type LaunchEvent = {
+	from: Vector3,
+	to: Vector3,
 	duration: number,
+	apex: number,
+	-- What it flies to, for the toast (e.g. "top outer guardian").
+	label: string,
+}
+
+export type RoundSummary = {
+	round: number,
+	winner: number,
+	-- Seconds the round was Active.
+	duration: number,
+	myTeam: number,
+	kills: number,
+	deaths: number,
+	assists: number,
+	damage: number,
+	structureDamage: number,
+	minions: number,
+	structuresDestroyed: number,
+	-- Per team (index 1 and 2).
+	teamKills: { number },
+	teamStructures: { number },
+	-- Display name of the top scorer, or "" if nobody scored.
+	mvp: string,
+}
+
+export type WaveInfo = {
+	lane: string,
+	team: number,
+	count: number,
+	front: number,
 }
 
 export type TuningRequest = {
@@ -97,6 +183,7 @@ return Net.define({
 			position = Guard.vector3(),
 			knockback = Guard.vector3(),
 			killed = Guard.boolean,
+			heavy = Guard.boolean,
 		}) :: Guard.Check<HitEvent>,
 	}),
 
@@ -124,6 +211,7 @@ return Net.define({
 			team = Guard.optional(id),
 			maxHealth = finite,
 			radius = finite,
+			scale = Guard.optional(finite),
 		}) :: Guard.Check<NpcSpawnEvent>,
 	}),
 
@@ -137,16 +225,129 @@ return Net.define({
 		reliable = false,
 	}),
 
-	-- A telegraph or impact for clients to draw.
-	NpcAction = Net.serverToClient({
+	-- Minions near this client (Shared.Combat.MinionCodec): only changed minions, plus every
+	-- minion in range once a second. Chunked under 900 bytes.
+	MinionSnapshot = Net.serverToClient({
+		check = Guard.buffer(1000),
+		reliable = false,
+	}),
+
+	-- Once a second, for the minimap: per lane and team, how many minions are alive and how far
+	-- the front of the wave has advanced (0 = own base, 1 = enemy base).
+	WaveSummary = Net.serverToClient({
+		check = Guard.array(
+			Guard.struct({
+				lane = Guard.oneOf({ "top", "middle", "bottom" }),
+				team = id,
+				count = id,
+				front = finite,
+			}),
+			6
+		) :: Guard.Check<{ WaveInfo }>,
+		reliable = false,
+	}),
+
+	-- A monster telegraph, impact, projectile launch, phase change or stagger (see
+	-- MonsterActionEvent).
+	MonsterAction = Net.serverToClient({
 		check = Guard.struct({
 			id = id,
-			action = Guard.oneOf({ "telegraph", "impact" }),
+			action = Guard.oneOf({ "telegraph", "impact", "projectile", "phase", "stagger" }),
+			shape = Guard.oneOf({ "circle", "cone", "line", "none" }),
 			x = finite,
 			z = finite,
+			dx = finite,
+			dz = finite,
 			radius = finite,
+			reach = finite,
+			arc = finite,
+			count = id,
+			spread = finite,
+			speed = finite,
+			startsAt = finite,
+			endsAt = finite,
+			value = finite,
+		}) :: Guard.Check<MonsterActionEvent>,
+	}),
+
+	-- Eggs and hatcheries ---------------------------------------------------------------------
+
+	-- To the owner: an egg they incubated has hatched; choose what it becomes before `expiresAt`
+	-- (server time), or it is unleashed.
+	HatchReady = Net.serverToClient({
+		check = Guard.struct({
+			egg = id,
+			kind = Guard.string(32),
+			rarity = Guard.string(16),
+			hatchery = Guard.string(32),
+			expiresAt = finite,
+		}) :: Guard.Check<HatchReadyEvent>,
+	}),
+
+	-- The owner's choice for a hatched egg. `target`: the pet to replace (claim with a full
+	-- stable) or to feed.
+	HatchChoice = Net.clientToServer({
+		check = Guard.struct({
+			egg = id,
+			choice = Guard.oneOf({ "claim", "feed", "unleash" }),
+			target = Guard.optional(id),
+		}) :: Guard.Check<HatchChoiceRequest>,
+		rateLimit = { rate = 2, burst = 4 },
+	}),
+
+	-- Progression and pets ---------------------------------------------------------------------
+
+	-- To the player: their active class levelled up.
+	LevelUp = Net.serverToClient({
+		check = Guard.struct({ level = id, class = Guard.string(32) }) :: Guard.Check<LevelUpEvent>,
+	}),
+
+	-- Choose the active pet (0 for none). Only allowed in your own base.
+	SetActivePet = Net.clientToServer({
+		check = id,
+		rateLimit = { rate = 1, burst = 3 },
+	}),
+
+	-- To the defending team: an enemy started raiding one of their hatcheries.
+	RaidAlert = Net.serverToClient({
+		check = Guard.struct({
+			hatchery = Guard.string(32),
+			lane = Guard.string(16),
+			raider = Guard.string(64),
+		}) :: Guard.Check<RaidAlertEvent>,
+	}),
+
+	-- To the launching player: fly this arc (Shared.Launchers).
+	Launch = Net.serverToClient({
+		check = Guard.struct({
+			from = Guard.vector3(),
+			to = Guard.vector3(),
 			duration = finite,
-		}) :: Guard.Check<NpcActionEvent>,
+			apex = finite,
+			label = Guard.string(64),
+		}) :: Guard.Check<LaunchEvent>,
+	}),
+
+	-- Rounds ---------------------------------------------------------------------------------
+
+	-- Sent to each player when a round ends: the result and their stats for the round.
+	RoundSummary = Net.serverToClient({
+		check = Guard.struct({
+			round = id,
+			winner = id,
+			duration = finite,
+			myTeam = id,
+			kills = id,
+			deaths = id,
+			assists = id,
+			damage = finite,
+			structureDamage = finite,
+			minions = id,
+			structuresDestroyed = id,
+			teamKills = Guard.array(id, 2),
+			teamStructures = Guard.array(id, 2),
+			mvp = Guard.string(64),
+		}) :: Guard.Check<RoundSummary>,
 	}),
 
 	-- Dev tools ----------------------------------------------------------------------------
@@ -177,7 +378,7 @@ return Net.define({
 
 	-- Dev tool: a reply to a dev chat command, shown as a system message in chat.
 	DevMessage = Net.serverToClient({
-		check = Guard.string(500),
+		check = Guard.string(2000),
 	}),
 
 	-- Server performance numbers for the debug overlay, sent about once a second.

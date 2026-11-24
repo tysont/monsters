@@ -5,6 +5,7 @@
 -- `Config.resolve(environment)` is pure (no engine access) so it can be unit tested under Lune.
 
 local Environment = require("@self/Environment")
+local Monsters = require("./Monsters")
 
 export type Environment = Environment.Environment
 
@@ -52,6 +53,192 @@ export type Config = {
 	},
 	respawn: RespawnConfig,
 	combat: CombatConfig,
+	minions: MinionConfig,
+	-- Monster definitions by ID (guardians, Titans, gym monsters; jungle monsters from Phase 7).
+	monsters: { [string]: MonsterDefinition },
+	camps: CampConfig,
+	eggs: EggConfig,
+	progression: ProgressionConfig,
+	data: DataConfig,
+	structures: StructureConfig,
+	launchers: LauncherConfig,
+}
+
+-- Monster definitions live in Shared.Monsters (one file per type); these are re-exported here.
+export type MonsterAttack = Monsters.Attack
+export type MonsterDefinition = Monsters.Definition
+
+export type CampTier = {
+	-- Multiply the camp monster's health and damage.
+	healthScale: number,
+	damageScale: number,
+	-- Seconds from clearing the camp until it respawns.
+	respawnSeconds: number,
+	-- Egg rarity dropped by this tier (Phase 8 uses it).
+	rarity: string,
+}
+
+export type CampConfig = {
+	-- Monster type at each jungle camp: camp k of each quadrant uses types[(k + quadrant) % #types].
+	types: { string },
+	-- Tiers by distance from the centre line: tier 3 (hardest) within tierEdges[2] studs of it,
+	-- tier 2 within tierEdges[1], tier 1 beyond.
+	tierEdges: { number },
+	tiers: { CampTier },
+	-- Camp monsters return home beyond this distance from the camp.
+	leashRange: number,
+	-- A damaged camp with no hostile within leashRange + 10 for this long resets to full.
+	resetSeconds: number,
+	-- Health grows by this fraction per attacker beyond the first, up to maxGroupScale.
+	groupScalePerAttacker: number,
+	maxGroupScale: number,
+}
+
+export type ProgressionConfig = {
+	-- XP from level L to L + 1 is xpBase + xpGrowth * (L - 1) ^ xpExponent. Levels never cap.
+	xpBase: number,
+	xpGrowth: number,
+	xpExponent: number,
+	-- A class below the player's highest class level earns XP at this multiplier until it
+	-- catches up.
+	catchUpMultiplier: number,
+	-- Account level needed for each pet slot (first slot at the start).
+	petSlotLevels: { number },
+	titles: { { level: number, name: string } },
+	-- Pet multiplier 1 + petBonus * x / (x + petHalfXp) for pet XP x (ceiling 1 + petBonus).
+	petBonus: number,
+	petHalfXp: number,
+	-- Pet XP from feeding a hatched egg, by rarity; matching the pet's type multiplies it.
+	feedXp: { common: number, rare: number, epic: number, legendary: number },
+	feedMatchBonus: number,
+	-- XP awards.
+	xp: {
+		-- Per minion with proximity credit.
+		minion: number,
+		-- Per hit point of a defeated camp monster, shared by everyone who damaged it.
+		monsterPerHealth: number,
+		-- Per structure destroyed, to every player on the attacking team within structureRange.
+		outerGuardian: number,
+		innerGuardian: number,
+		titan: number,
+		structureRange: number,
+		kill: number,
+		assist: number,
+		-- To everyone who damaged the camp, times its tier.
+		campClear: number,
+		eggDeposited: number,
+		eggHatched: number,
+		raid: number,
+		roundWin: number,
+		roundLoss: number,
+		-- To the owner of an unleashed monster, per point of damage it deals.
+		unleashPerDamage: number,
+	},
+	-- Pets deal this fraction of their monster type's damage.
+	petDamageScale: number,
+	-- Seconds before a pet comes back after its owner respawns or switches.
+	petRespawnSeconds: number,
+}
+
+export type DataConfig = {
+	-- Data store names are prefixed per environment, so Studio never touches live data.
+	storePrefix: string,
+	storeName: string,
+	autosaveSeconds: number,
+	-- A lock not refreshed for this long belongs to a dead server and may be taken over.
+	staleLockSeconds: number,
+	-- Load attempts (with backoff) before the player is told and removed.
+	loadAttempts: number,
+	-- Use an in-memory store when data stores are unavailable (Studio without API access). Never
+	-- in production, where a failed load must not become an empty profile.
+	allowMemoryFallback: boolean,
+}
+
+export type EggConfig = {
+	-- Seconds in a hatchery slot by rarity.
+	incubation: { common: number, rare: number, epic: number, legendary: number },
+	-- Slots per hatchery.
+	slots: number,
+	-- Carriers walk at this fraction of normal speed and cannot dodge.
+	carrySpeedScale: number,
+	-- Eggs on the ground (from a camp or a fallen carrier) disappear after this long.
+	droppedSeconds: number,
+	-- Seconds a raider holds the raid prompt.
+	raidSeconds: number,
+	-- Raiding needs the hatchery lane's outer guardian dead.
+	raidRequiresOuterGuardian: boolean,
+	-- The owner has this long to choose what a hatched egg becomes; then it is unleashed.
+	choiceSeconds: number,
+	-- Unleashed monsters' health and damage by rarity.
+	rarityScale: { common: number, rare: number, epic: number, legendary: number },
+	-- Slack in studs for carrier movement checks.
+	moveTolerance: number,
+	-- Seconds between egg interactions per player (pick up, deposit, raid).
+	interactCooldown: number,
+}
+-- Launch pads (rules in Shared.Launchers).
+export type LauncherConfig = {
+	-- How far inside the base (from the lane's gate) a pad sits.
+	padInset: number,
+	-- Pads activate within this many studs.
+	padRange: number,
+	-- Landing spot: this far along the lane from the guardian, towards your base.
+	landingOffset: number,
+	-- Flight time = distance / flightSpeed + flightBase, clamped to [minSeconds, maxSeconds].
+	flightSpeed: number,
+	flightBase: number,
+	minSeconds: number,
+	maxSeconds: number,
+	-- Arc peak above the straight line = distance * apexPerStud, clamped to [minApex, maxApex].
+	apexPerStud: number,
+	minApex: number,
+	maxApex: number,
+	-- Seconds between launches per player.
+	cooldownSeconds: number,
+}
+
+export type StructureConfig = {
+	-- Multiplies every guardian and Titan's health (dev testing; 1 in play).
+	healthScale: number,
+	-- A guardian prefers a hostile who hurt one of its team's players nearby, for this long.
+	provokeSeconds: number,
+	-- Range around a guardian in which hurting its teammates provokes it.
+	provokeRange: number,
+	-- While the Titan has taken damage in the last alertSeconds, its team respawns faster.
+	alertSeconds: number,
+	defenderRespawnScale: number,
+}
+
+export type MinionKindConfig = {
+	maxHealth: number,
+	damage: number,
+	attackRange: number,
+	attackCooldown: number,
+	speed: number,
+	radius: number,
+}
+
+export type MinionConfig = {
+	-- Seconds between waves (per lane, per team); the first wave comes firstWaveDelay seconds
+	-- after the round becomes Active.
+	waveInterval: number,
+	firstWaveDelay: number,
+	-- Wave makeup, front to back.
+	composition: { { kind: string, count: number } },
+	-- Seconds between minions leaving the spawn in one wave.
+	spawnStagger: number,
+	-- Side-to-side spread of a wave across the lane.
+	formationWidth: number,
+	-- Minions engage enemies within this range of themselves.
+	aggroRange: number,
+	-- Hostile players within this range of a dying minion get credit (XP from Phase 9, gold
+	-- from Phase 12).
+	creditRadius: number,
+	-- Clients receive minions within this range of their character.
+	interestRadius: number,
+	-- Every minion in range is resent this often even if unchanged.
+	keyframeSeconds: number,
+	kinds: { melee: MinionKindConfig, ranged: MinionKindConfig },
 }
 
 -- Base stats for a class at level 1 with no pet. Phase 10 adds the other classes.
@@ -121,11 +308,6 @@ export type CombatConfig = {
 	enemies: {
 		dummy: EnemyConfig,
 		weak: EnemyConfig,
-		slammer: EnemyConfig & {
-			slamRadius: number,
-			telegraphSeconds: number,
-			recoverSeconds: number,
-		},
 	},
 	sounds: {
 		swing: string,
@@ -231,24 +413,120 @@ local function base(environment: Environment): Config
 					attackRange = 4,
 					attackCooldown = 1.5,
 				},
-				slammer = {
-					maxHealth = 400,
-					radius = 4,
-					speed = 6,
-					aggroRange = 45,
-					damage = 35,
-					attackRange = 12,
-					attackCooldown = 1,
-					slamRadius = 14,
-					telegraphSeconds = 1,
-					recoverSeconds = 1.5,
-				},
 			},
 			sounds = {
 				swing = "rbxassetid://9119710806",
 				hit = "rbxassetid://9117971636",
 				slam = "rbxassetid://9113524242",
 			},
+		},
+		minions = {
+			waveInterval = 30,
+			firstWaveDelay = 5,
+			composition = {
+				{ kind = "melee", count = 3 },
+				{ kind = "ranged", count = 3 },
+			},
+			spawnStagger = 0.5,
+			formationWidth = 8,
+			aggroRange = 16,
+			creditRadius = 40,
+			interestRadius = 300,
+			keyframeSeconds = 1,
+			kinds = {
+				melee = { maxHealth = 40, damage = 6, attackRange = 3.5, attackCooldown = 1.2, speed = 9, radius = 1.4 },
+				ranged = { maxHealth = 30, damage = 5, attackRange = 14, attackCooldown = 1.6, speed = 9, radius = 1.2 },
+			},
+		},
+		monsters = Monsters,
+		camps = {
+			types = { "splitter", "shellback", "burrower" },
+			tierEdges = { 350, 180 },
+			tiers = {
+				{ healthScale = 1, damageScale = 1, respawnSeconds = 60, rarity = "common" },
+				{ healthScale = 1.4, damageScale = 1.15, respawnSeconds = 75, rarity = "rare" },
+				{ healthScale = 1.9, damageScale = 1.3, respawnSeconds = 90, rarity = "epic" },
+			},
+			leashRange = 45,
+			resetSeconds = 6,
+			groupScalePerAttacker = 0.15,
+			maxGroupScale = 1.6,
+		},
+		eggs = {
+			incubation = { common = 60, rare = 120, epic = 180, legendary = 240 },
+			slots = 4,
+			carrySpeedScale = 0.7,
+			droppedSeconds = 90,
+			raidSeconds = 3,
+			raidRequiresOuterGuardian = true,
+			choiceSeconds = 30,
+			rarityScale = { common = 1, rare = 1.3, epic = 1.6, legendary = 2 },
+			moveTolerance = 8,
+			interactCooldown = 0.5,
+		},
+		progression = {
+			xpBase = 100,
+			xpGrowth = 25,
+			xpExponent = 1.2,
+			catchUpMultiplier = 2,
+			petSlotLevels = { 1, 15, 40 },
+			titles = {
+				{ level = 5, name = "Recruit" },
+				{ level = 15, name = "Tamer" },
+				{ level = 40, name = "Warden" },
+				{ level = 80, name = "Titanbreaker" },
+			},
+			petBonus = 0.2,
+			petHalfXp = 2000,
+			feedXp = { common = 200, rare = 400, epic = 800, legendary = 1600 },
+			feedMatchBonus = 1.5,
+			xp = {
+				minion = 4,
+				monsterPerHealth = 0.1,
+				outerGuardian = 150,
+				innerGuardian = 200,
+				titan = 300,
+				structureRange = 120,
+				kill = 50,
+				assist = 25,
+				campClear = 40,
+				eggDeposited = 30,
+				eggHatched = 40,
+				raid = 60,
+				roundWin = 200,
+				roundLoss = 100,
+				unleashPerDamage = 0.1,
+			},
+			petDamageScale = 0.3,
+			petRespawnSeconds = 3,
+		},
+		data = {
+			storePrefix = "dev_",
+			storeName = "profiles_v1",
+			autosaveSeconds = 60,
+			staleLockSeconds = 600,
+			loadAttempts = 4,
+			allowMemoryFallback = true,
+		},
+		structures = {
+			healthScale = 1,
+			provokeSeconds = 4,
+			provokeRange = 36,
+			alertSeconds = 8,
+			defenderRespawnScale = 0.5,
+		},
+		launchers = {
+			padInset = 22,
+			padRange = 10,
+			landingOffset = 18,
+			flightSpeed = 170,
+			flightBase = 0.6,
+			minSeconds = 1.5,
+			maxSeconds = 4,
+			apexPerStud = 0.25,
+			minApex = 40,
+			maxApex = 120,
+			cooldownSeconds = 1,
 		},
 	}
 end
@@ -257,12 +535,15 @@ end
 local overrides: { [Environment]: (config: Config) -> () } = {
 	dev = function(_config: Config) end,
 	test = function(config: Config)
+		config.data.storePrefix = "test_"
 		config.net.logViolations = false
 	end,
 	production = function(config: Config)
 		config.debug.overlayExpandedByDefault = false
 		config.net.validateServerPayloads = false
 		config.combat.gym.enabled = false
+		config.data.storePrefix = ""
+		config.data.allowMemoryFallback = false
 	end,
 }
 

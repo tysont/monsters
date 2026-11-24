@@ -1,0 +1,90 @@
+--!strict
+-- Titan: the base boss. Locked until an inner guardian falls; its death ends the round. Three
+-- phases: volley from phase 2, quake from phase 3, faster each phase.
+
+local Types = require("./Types")
+
+local definition: Types.Definition = {
+	name = "Titan",
+	maxHealth = 8000,
+	radius = 9,
+	height = 26,
+	speed = 0,
+	aggroRange = 38,
+	leashRange = 0,
+	defence = 0,
+	wakeRange = 50,
+	attacks = {
+		{
+			id = "slam",
+			primitive = "slam",
+			origin = "target",
+			minRange = 0,
+			maxRange = 36,
+			damage = 40,
+			telegraphSeconds = 1.2,
+			recoverSeconds = 1.2,
+			cooldown = 2.5,
+			radius = 8,
+			knockback = 35,
+			heavy = true,
+			weight = 2,
+		},
+		{
+			id = "sweep",
+			primitive = "sweep",
+			minRange = 0,
+			maxRange = 16,
+			damage = 35,
+			telegraphSeconds = 0.9,
+			recoverSeconds = 1,
+			cooldown = 2,
+			reach = 24,
+			arc = 140,
+			knockback = 30,
+			heavy = true,
+			weight = 3,
+		},
+		-- Phase 2: a fan of three bolts.
+		{
+			id = "volley",
+			primitive = "projectile",
+			minRange = 6,
+			maxRange = 38,
+			damage = 25,
+			telegraphSeconds = 0.75,
+			recoverSeconds = 1,
+			cooldown = 3,
+			radius = 1.8,
+			reach = 50,
+			speed = 50,
+			count = 3,
+			spread = 20,
+			knockback = 14,
+			minPhase = 2,
+			weight = 3,
+		},
+		-- Phase 3: a ground quake all around the Titan.
+		{
+			id = "quake",
+			primitive = "slam",
+			origin = "self",
+			minRange = 0,
+			maxRange = 16,
+			damage = 45,
+			telegraphSeconds = 1.3,
+			recoverSeconds = 1.6,
+			cooldown = 6,
+			radius = 22,
+			knockback = 45,
+			heavy = true,
+			minPhase = 3,
+			weight = 4,
+		},
+	},
+	stagger = { threshold = 320, seconds = 3.5, bonus = 1.5, decayPerSecond = 25 },
+	phases = { 0.66, 0.33 },
+	phaseTempo = 0.85,
+}
+
+return definition

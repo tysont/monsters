@@ -198,6 +198,11 @@ function TeamService.setTeam(id: string, team: number): boolean
 	return true
 end
 
+-- Recomputes and republishes team strength (call when a member's power changes).
+function TeamService.refresh()
+	publish()
+end
+
 function TeamService.idOf(player: Player): string
 	return playerId(player)
 end

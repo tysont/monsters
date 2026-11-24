@@ -19,12 +19,12 @@ Working title. "Hatch a Monster" and "Monster Fighters" are the other candidates
 | 1 | Map greybox | Complete |
 | 2 | Teams, sessions, and round skeleton | Complete |
 | 3 | Player combat core | In Progress |
-| 4 | UI foundation and HUD v1 | Not Started |
-| 5 | Minion system and load harness | Not Started |
-| 6 | Guardians and Titan (first full round) | Not Started |
-| 7 | Jungle camps and monster kit | Not Started |
-| 8 | Eggs and hatcheries | Not Started |
-| 9 | Persistence, levels, and pets | Not Started |
+| 4 | UI foundation and HUD v1 | Complete |
+| 5 | Minion system and load harness | Complete |
+| 6 | Guardians and Titan (first full round) | Complete |
+| 7 | Jungle camps and monster kit | Complete |
+| 8 | Eggs and hatcheries | Complete |
+| 9 | Persistence, levels, and pets | Complete |
 | 10 | Classes | Not Started |
 | 11 | Balance, anti-snowball, and telemetry | Not Started |
 | 12 | Gold, cosmetics, and monetization | Not Started |
@@ -346,28 +346,29 @@ Added in the Phase 13B mobile and console pass: a mid-range Android phone (Galax
 - **Performance gate:** `/botfight 20` (40 bots) for 25 s: NPC simulation (AI, melee through the damage pipeline, snapshots) averaged 0.035 ms per frame, max 0.075 ms; server held 60 Hz (worst frame 19.6 ms); 105 defeats; server send about 3.8 KB/s. Measured on the development PC.
 - **Fun gate access (open):** the gym and its commands only exist in Studio and for the owner, and live servers count as production. For outside playtesters on the main place, a playtest mode is needed (see the hand-off question to the owner).
 - **Fun gate rounds:** none yet.
+- **Fun gate deferred (owner decision, 2026-11-22):** Phase 4 starts before the fun gate runs. Phase 3 stays In Progress until the gate passes; if it later fails, combat is retuned (or reconsidered) before further phase work builds on it.
 
 ---
 
 ## Phase 4: UI foundation and HUD v1
 
-**Status:** Not Started
+**Status:** Complete
 
 **Goal:** A design system and UI framework that every later phase builds on, plus the first real HUD. The target is a clean, modern look comparable to top current Roblox games.
 
 **Tasks**
 
-- [ ] Choose the UI framework (Fusion or React-lua) and record the decision.
-- [ ] Define design tokens: colour palette (neutral dark surfaces, one accent per team, semantic colours for health, danger, rarity), type scale, spacing scale, corner radii, stroke, elevation, motion durations and easing.
-- [ ] Build core components: button, icon button, panel, modal, tab bar, list, card, progress bar, tooltip, toast, badge, cooldown ring.
-- [ ] Responsive layout for desktop: scale from 1366x768 to 4K and ultrawide, respect the Roblox top bar. Keep layouts adaptable so touch, tablet and console layouts can be added in the Phase 13B mobile pass.
-- [ ] Full keyboard navigation for every component (gamepad in the Phase 13B mobile and console pass).
-- [ ] Motion: spring-based transitions, press feedback, number roll-ups; a reduced-motion setting.
-- [ ] HUD v1: health bar, level badge, ability buttons with cooldowns, team score strip, round timer, kill feed, respawn screen.
-- [ ] World-space UI: name plates, health bars over players, damage numbers, all pooled.
-- [ ] Minimap v1: lanes, bases, teammates.
-- [ ] Settings screen shell: effects quality (the game's own effect tiers; games cannot change Roblox's graphics quality level), audio sliders, control options, reduced motion.
-- [ ] Component gallery: a dev-only screen in the main place for visual review of every component in every state.
+- [x] Choose the UI framework (Fusion or React-lua) and record the decision.
+- [x] Define design tokens: colour palette (neutral dark surfaces, one accent per team, semantic colours for health, danger, rarity), type scale, spacing scale, corner radii, stroke, elevation, motion durations and easing.
+- [x] Build core components: button, icon button, panel, modal, tab bar, list, card, progress bar, tooltip, toast, badge, cooldown ring.
+- [x] Responsive layout for desktop: scale from 1366x768 to 4K and ultrawide, respect the Roblox top bar. Keep layouts adaptable so touch, tablet and console layouts can be added in the Phase 13B mobile pass.
+- [x] Full keyboard navigation for every component (gamepad in the Phase 13B mobile and console pass).
+- [x] Motion: spring-based transitions, press feedback, number roll-ups; a reduced-motion setting.
+- [x] HUD v1: health bar, level badge, ability buttons with cooldowns, team score strip, round timer, kill feed, respawn screen.
+- [x] World-space UI: name plates, health bars over players, damage numbers, all pooled.
+- [x] Minimap v1: lanes, bases, teammates.
+- [x] Settings screen shell: effects quality (the game's own effect tiers; games cannot change Roblox's graphics quality level), audio sliders, control options, reduced motion.
+- [x] Component gallery: a dev-only screen in the main place for visual review of every component in every state.
 
 **Acceptance tests**
 
@@ -379,31 +380,47 @@ Added in the Phase 13B mobile and console pass: a mid-range Android phone (Galax
 
 **Implementation notes**
 
-_None yet._
+- **Framework: Fusion 0.3** (`elttob/fusion@0.3.0` via Wally) rather than React-lua (`roblox/react` 17.3). Fusion is small, written for Luau, and has springs and tweens built in (the motion task); React-lua would add a large dependency tree with weaker strict typing. Strict typing works with a few casts: string-literal unions, `ForValues` inner scopes, and children lists passed through props (typed `{ any }`).
+- **Package types:** Wally link files only `return require(...)`, so luau-lsp could not see Fusion\x27s exported types. `scripts/package-types.luau` (run by `make packages` and `make setup`) rewrites each link file to re-export the package\x27s `export type` declarations. This replaces the `wally-package-types` tool, which was not installed because adding a new third-party binary needs the owner\x27s approval.
+- **Rojo:** the optional `Packages` path is only picked up when Rojo starts; after the first `wally install` the Rojo task was restarted and the Studio plugin reconnected.
+- **Structure:** `src/client/UI/` holds `Theme` (tokens: colours with one accent per team, semantic and rarity colours, type scale, spacing, radii, stroke, elevation, motion), `UiState` (root Fusion scope, session settings, screen scale), `Motion` (springs that settle instantly with reduced motion), `Layout`, `Components/` (Button, IconButton, Panel, Text, Modal, TabBar, List, Card, ProgressBar, Tooltip, Toast, Badge, CooldownRing) and `Screens/` (Hud, Minimap, SettingsScreen, Gallery). `UiController` mounts them and keeps `HudState` current; `NameplateController` draws world-space plates. The Phase 2 placeholder RoundHud and the Phase 3 placeholder HP bar and kill feed were removed.
+- **Responsive layout:** designed in points at 1600 x 900; each screen\x27s root frame gets a `UIScale` of min(width / 1600, height / 900) clamped to 0.8 to 2.4, and is sized so it fills the core UI safe area after scaling (`ScreenInsets = CoreUISafeInsets`, so nothing sits under the Roblox top bar). At both 1366 x 768 (scale 0.85) and 3840 x 2160 (scale 2.4) the layout is identical in points.
+- **Keyboard and gamepad:** every interactive control is `Selectable`; opening a modal selects its first control, arrows move, Enter (or A) activates, Backspace (or B) or the close button closes. Escape is reserved by Roblox for its system menu, so it cannot close game dialogs. P toggles settings. The debug overlay is not a navigation target.
+- **Motion:** springs drive button colour and press scale, modal fade and scale, tab underline, progress fills and the team kill roll-up; the reduced-motion setting makes them instant and turns off camera shake.
+- **HUD v1:** team strip (name, members, round kills with roll-up, strength) with the round timer between the teams; result and new-teams banner (also the shutdown message); minimap with lanes, bases and teammates; kill feed (your kills, deaths and assists highlighted); ability buttons with cooldown rings and key badges (clickable, same functions as keys); level badge and health bar; settings button; respawn screen with killer name and countdown; toasts. Team kill counts are a `Kills` attribute per team, reset on `roundReset`; class level is a `ClassLevel` player attribute.
+- **Settings shell:** effects quality (Low turns off shake and hit flash; it controls the game\x27s own effects, since games cannot change Roblox\x27s graphics level), master, effects and music volume (effects play through an SFX SoundGroup), aim attacks with camera, reduced motion. Kept for the session until Phase 9 saves them.
+- **World-space UI:** one name plate per other player (name in team colour, level, health bar), parented to the local PlayerGui and moved onto each new character, with Roblox\x27s default name and health display turned off. Damage numbers are the pooled ones from Phase 3. Only one real client was available, so plates were not seen on screen (verify in the Phase 3 multi-client session).
+- **Component gallery:** `/gallery` (dev only) shows every component and state, including an animated cooldown ring and toast triggers.
+- **No per-frame instance creation:** HUD values update at 20 Hz and only when changed; the minimap uses a fixed pool of 24 dot frames and only pushes new positions when a dot moves more than half a stud. Kill feed lines and toasts are created per event, not per frame.
+- **Bugs found in Studio and fixed:** the cooldown ring rotated the wrong half (fixed and checked in the gallery); a `UIStroke` on text buttons outlined the text instead of the border (`ApplyStrokeMode.Border`); the first modal control could not take selection while the modal was still invisible during its fade-in.
+- **Acceptance, mouse and keyboard:** settings opened with P, arrows moved between tabs, Enter switched to the Audio page, and the close button and Backspace close it; attacks and dodges work from keys and from the ability buttons.
+- **Acceptance, resolutions:** with Device Simulator custom desktop devices at 1366 x 768 and 3840 x 2160, an automated check found nothing off screen, and screenshots show the HUD readable and unobstructed at both (simulator reset and custom devices removed afterwards).
+- **Acceptance, system UI:** all screens use the core UI safe area; nothing overlaps the top bar in any screenshot.
+- **Performance gate:** HUD update cost on the development PC was 0.018 ms per frame idle and 0.08 ms in a 18-NPC fight. Approximated low-end PC (Studio limited to 2 CPU cores and rendering quality level 1, both restored afterwards): 0.062 ms average and 0.138 ms worst per frame during the same fight, FPS at least 59. Fusion\x27s own spring animation steps run outside this measurement; they animate only while values change.
 
 ---
 
 ## Phase 5: Minion system and load harness
 
-**Status:** Not Started
+**Status:** Complete
 
 **Goal:** Waves of minions marching and fighting down all three lanes at full scale, proven by an automated load test. This is the highest-risk system for performance.
 
 **Tasks**
 
-- [ ] Minion data model: struct-of-arrays storage with free-list reuse.
-- [ ] Movement along the lane spline as a scalar lane progress plus lateral offset; no pathfinding.
-- [ ] Wave spawner per lane per team on a timer, with wave composition in config.
-- [ ] Targeting through the spatial grid: nearest enemy minion, then player, then guardian.
-- [ ] Minion combat: melee and ranged variants, attack timers, damage through the shared pipeline.
-- [ ] Player-versus-minion hits resolved against the data arrays.
-- [ ] Proximity credit for nearby players (no last-hit requirement): emit credit events now; XP is applied from Phase 9 and gold from Phase 12.
-- [ ] Snapshot replication: packed buffers, delta encoded, 10 Hz, filtered by interest area, chunked by interest cell with an entity cap per message so every unreliable message stays under 900 bytes (the engine drops messages over 1000 bytes).
-- [ ] Client renderer: pooled models, interpolation, local animation, local hit and death effects, level-of-detail by distance (full model, simplified model, hidden with minimap dot).
-- [ ] Minimap: minion wave indicators per lane.
-- [ ] Bot load harness: N server-side bot entities (see section 2) that move down lanes, attack, dodge, and die through the same code paths as players, for repeatable tests.
-- [ ] Automated performance report: server frame time, per-system time, bytes per client, and client frame time measured with several real clients (Studio multi-client test) on the reference PCs (low-end approximated until Phase 15).
-- [ ] Evaluate moving the minion tick to Parallel Luau if the single-thread budget is exceeded.
+- [x] Minion data model: struct-of-arrays storage with free-list reuse.
+- [x] Movement along the lane spline as a scalar lane progress plus lateral offset; no pathfinding.
+- [x] Wave spawner per lane per team on a timer, with wave composition in config.
+- [x] Targeting through the spatial grid: nearest enemy minion, then player, then guardian.
+- [x] Minion combat: melee and ranged variants, attack timers, damage through the shared pipeline.
+- [x] Player-versus-minion hits resolved against the data arrays.
+- [x] Proximity credit for nearby players (no last-hit requirement): emit credit events now; XP is applied from Phase 9 and gold from Phase 12.
+- [x] Snapshot replication: packed buffers, delta encoded, 10 Hz, filtered by interest area, chunked by interest cell with an entity cap per message so every unreliable message stays under 900 bytes (the engine drops messages over 1000 bytes).
+- [x] Client renderer: pooled models, interpolation, local animation, local hit and death effects, level-of-detail by distance (full model, simplified model, hidden with minimap dot).
+- [x] Minimap: minion wave indicators per lane.
+- [x] Bot load harness: N server-side bot entities (see section 2) that move down lanes, attack, dodge, and die through the same code paths as players, for repeatable tests.
+- [x] Automated performance report: server frame time, per-system time, bytes per client, and client frame time measured with several real clients (Studio multi-client test) on the reference PCs (low-end approximated until Phase 15).
+- [x] Evaluate moving the minion tick to Parallel Luau if the single-thread budget is exceeded.
 
 **Acceptance tests**
 
@@ -415,31 +432,48 @@ _None yet._
 
 **Implementation notes**
 
-_None yet._
+- **Pure modules (Lune tested, 12 new tests, 126 in total):** `Shared.Combat.SpatialGrid` (uniform grid, 16-stud cells in combat and 32 for interest; O(1) moves and swap-remove), `MinionCodec` (10 bytes per minion including kind and team, so clients need no spawn events; `quantize` for change detection), `Minions` (wave plan and scale, formation offsets, direction of travel, target priority, combatant ID mapping).
+- **Spatial grid in combat:** `CombatService` keeps every combatant in the grid (refreshed at 20 Hz with position history). Melee swings, area hits, nearest-hostile searches and minion targeting query nearby cells instead of scanning every combatant; this also speeds up the Phase 3 gym NPCs and bots.
+- **Minion data model:** `MinionService` keeps lane, distance along the lane, lateral offset, position, facing, state, target, timers and knockback in parallel arrays indexed by slot, with a free list. Each slot also owns one `CombatService` entry created the first time the slot is used and reused for every later minion in it (its position function reads the arrays), so minion damage goes through the shared pipeline and players hit minions through the normal melee path. This is a deliberate hybrid: simulation state is struct-of-arrays, combat state is one reusable record per slot.
+- **Waves:** every 30 s per lane per team during Active (first wave 5 s in), 3 melee then 3 ranged, spread 8 studs across the lane; cleared on round reset. Minions walk their lane by distance and offset, engage within 16 studs (nearest enemy minion first, then players and bots; guardians from Phase 6), chase, fight, then rejoin the lane from where they stand. A minion that reaches the enemy base is removed for now (Phase 6 makes it attack the Titan). Melee: 40 HP, 6 damage every 1.2 s; ranged: 30 HP, 5 damage every 1.6 s at 14 studs (instant hit, no projectile visual yet).
+- **Kill feed and team score:** minion defeats are not announced to the kill feed and do not count towards team kills; hits between two minions send no hit event (health shows through snapshots).
+- **Proximity credit:** when a minion dies, every hostile player within 40 studs fires `CombatService.credited` (XP from Phase 9, gold from Phase 12); a `MinionCredits` player attribute counts them for testing.
+- **Replication:** per client, minions within 300 studs of their character, at 10 Hz; only minions whose quantised position, facing, health or state changed since last sent to that client, plus every minion in range once a second (keyframe). Chunks are grouped by grid cell and capped under 900 bytes. Dying minions are sent with a dead state for a second, then released.
+- **Client renderer:** `MinionRenderController` pools models per kind, team and level of detail (no per-frame creation once warm), interpolates 100 ms behind the server clock, bobs fighting minions, shows a health bar on damaged minions up close, shrinks and fades the dying, and releases minions not heard from for 2.5 s. Level of detail by camera distance: full model within 120 studs, a single block to 250, hidden beyond.
+- **Minimap:** a 1 Hz `WaveSummary` gives each lane and team's minion count and front; the minimap shows a diamond per wave front sized by count.
+- **Load harness:** lane bots (`NpcService` kind `lanebot`): Knight stats, push their lane, fight with the player melee path (`CombatService.meleeSwing`), dodge every few seconds through the player dodge path (`CombatService.dodge`), and respawn at their lane start. `/loadtest [bots] [scale]` spawns them and forces scaled waves every 12 s; `/perf` reports minion, NPC and combatant counts, per-frame minion tick (average and worst), snapshot and NPC cost, server send, and minion snapshot bytes per client. Also `/waves`, `/wave`, `/wavescale`, `/waveinterval`, `/clearminions`.
+- **Spike fix:** the first version ticked every minion on one frame ten times a second (about 3.5 ms at 720 minions, 7.7 ms on two cores); minions are now ticked in six groups, one per server frame, each integrating its own elapsed time, so the cost is flat.
+- **Acceptance, waves meet:** middle-lane waves met at the centre and fought (screenshot); over the next 20 s the fronts overlapped and swayed, and the side with survivors advanced (team 2 front 0.42 to 0.48) while later waves arrived.
+- **Acceptance, cutting through a wave:** five enemy minions in a row each died in exactly 2 Knight hits (3.6 s total).
+- **Acceptance, two clients agree:** not run with two real clients (MCP drives one). Both clients interpolate the same server-timestamped samples at server time minus 100 ms, so they differ only by clock-sync error (milliseconds, about 0.1 stud at walking speed) and 1/16-stud quantisation. Check visually in the multi-client session alongside the Phase 3 and 4 checks.
+- **Scaling (development PC, 40 lane bots):** minion tick per frame 0.10 ms at 72 minions, 0.18 at 216, 0.25 at 288, 0.31 ms (worst 0.57) at 360.
+- **Performance gate (approximated low-end PC: Studio limited to 2 cores and graphics level 1, restored afterwards; server and client share those cores in Studio):** 413 minions and 37 lane bots: minion tick 0.60 ms per frame (worst 0.99), snapshots 0.03 ms, NPCs 0.04 ms; server held 60 Hz (worst frame 20 ms); minion snapshots to the client 10.5 KB/s; client 60 FPS (95th percentile 18 ms, worst 19.4 ms) drawing 104 models. An earlier run with 932 minions also held 60 FPS on the client. Parallel Luau is not needed at this headroom.
+- **Not measured:** client frame time with several real clients at once (MCP drives one client).
+- **Studio note:** during the 720-minion run the game view stopped rendering because it was not the visible Studio tab (the game kept running; a screenshot call hung until the view was shown again). Keep the game view visible for render measurements.
 
 ---
 
 ## Phase 6: Guardians and Titan (first full round)
 
-**Status:** Not Started
+**Status:** Complete
 
 **Goal:** Lanes are defended, bases can fall, and a complete round can be played from start to reset.
 
 **Tasks**
 
-- [ ] Replace the Phase 3 throwaway test monster with the full monster behaviour framework, carrying over the tuning values that passed the fun gate.
-- [ ] Monster behaviour framework: state machine with idle, telegraph, attack, recover, stagger, dead.
-- [ ] Attack primitives, part one: ground slam (circle), sweep (cone), projectile.
-- [ ] Telegraph rendering: ground decals with fill timing, readable at a glance in a crowded fight.
-- [ ] Guardian definition: stationary, large health pool, two or three attacks, targets minions before players unless a player attacks a teammate nearby.
-- [ ] Lane gating: inner guardian is invulnerable until the outer guardian in that lane is dead; Titan is invulnerable until at least one inner guardian is dead.
-- [ ] Titan definition: three phases with changing attacks, defender buffs while it is under attack (faster respawn near base).
-- [ ] Stagger window: damage during recovery fills a stagger bar that opens a bonus-damage window.
-- [ ] Knockback and ragdoll on heavy hits, client-simulated with server-validated end positions.
-- [ ] Guardian sleep: no logic ticks when no enemy is in range.
-- [ ] Round end on Titan death, wired into the Phase 2 state machine.
-- [ ] HUD: guardian and Titan health on the score strip, boss bar when in range, lane status on minimap.
-- [ ] Round summary screen v1: winner, duration, personal stats.
+- [x] Replace the Phase 3 throwaway test monster with the full monster behaviour framework, carrying over the tuning values that passed the fun gate.
+- [x] Monster behaviour framework: state machine with idle, telegraph, attack, recover, stagger, dead.
+- [x] Attack primitives, part one: ground slam (circle), sweep (cone), projectile.
+- [x] Telegraph rendering: ground decals with fill timing, readable at a glance in a crowded fight.
+- [x] Guardian definition: stationary, large health pool, two or three attacks, targets minions before players unless a player attacks a teammate nearby.
+- [x] Lane gating: inner guardian is invulnerable until the outer guardian in that lane is dead; Titan is invulnerable until at least one inner guardian is dead.
+- [x] Titan definition: three phases with changing attacks, defender buffs while it is under attack (faster respawn near base).
+- [x] Stagger window: damage during recovery fills a stagger bar that opens a bonus-damage window.
+- [x] Knockback and ragdoll on heavy hits, client-simulated with server-validated end positions.
+- [x] Guardian sleep: no logic ticks when no enemy is in range.
+- [x] Round end on Titan death, wired into the Phase 2 state machine.
+- [x] HUD: guardian and Titan health on the score strip, boss bar when in range, lane status on minimap.
+- [x] Round summary screen v1: winner, duration, personal stats.
 
 **Acceptance tests**
 
@@ -451,28 +485,65 @@ _None yet._
 
 **Implementation notes**
 
-_None yet._
+- **Pure modules (Lune tested, 16 new tests, 142 in total):** `Shared.Combat.MonsterBrain` (state machine idle, telegraph, attack, recover, stagger, dead; attack choice by range band, cooldown, phase and weight; phase tempo; stagger bar), `Shared.Combat.Shapes` (circle, cone, segment tests, fans, worst-case escape distance), `Shared.Combat.Structures` (structure list from map markers, lane gating, guardian target priority). A spec checks every configured attack: its telegraph leaves time to react, attacks never come faster than the dodge cooldown, and guardian and Titan targeted slams and bolts can be walked out of.
+- **Definitions are data:** `Config.monsters` holds slammer, outerGuardian, innerGuardian and titan (stats, attacks with primitive, range band, telegraph, recovery, cooldown, shape sizes, knockback, heavy flag, minimum phase, weight; stagger; phases and tempo). The Phase 3 slammer is now a definition with its fun-gate tuning (35 damage, 14-stud slam, 1 s telegraph, 1.5 s recovery), and the throwaway NPC code is gone.
+- **MonsterService** drives every monster as an NPC row (`NpcService.spawnCustom`, a custom tick per row). When an attack is chosen, its aim is fixed and the telegraph is broadcast to players within 400 studs (`MonsterAction`). Impact lands exactly at the telegraph's end (scheduled, not on the 10 Hz tick). Circles and cones resolve 0.1 s later through `CombatService.shapeHit`, with invulnerability judged at impact. Bolts are simulated every frame with swept segment tests; dodged bolts fly on, and bolts from a dead monster fizzle.
+- **Stagger:** damage during recovery fills the bar (replicated in a new snapshot byte); full staggers the monster for 2.5 to 3.5 s with x1.5 damage taken (passed as a damage-pipeline modifier). Verified in the gym: eight bots on the slammer staggered it on its first recovery.
+- **Heavy hits:** knock players down on their own client (0.7 s, thrown and tipped; no attacks or dodges while down). The server remembers the start position and, after the knockdown, pulls the character back if it ended farther than the push plus walking allows (`CombatService` knockback checks).
+- **Sleep:** a monster with no hostile within its wake range runs only a 2 Hz check and sleeps again after 3 s with nothing to do. Normal play showed 1 of 14 structures awake.
+- **Structures:**
+  - An outer and inner guardian per lane per team plus a Titan per team, spawned at the map markers, persistent across `/clearnpcs`, and respawned on round reset.
+  - Lane gating sets `gated` (skipped as a target) and `protected` (hits miss). Everything is also locked outside the Active phase, so dev bots fighting through Intermission can't decide the next round.
+  - Guardians prefer provokers (hostiles who hurt their team's players or bots within 36 studs, for 4 s), then minions, then the nearest. This is unit tested only; seeing it live needs a second player.
+  - Minions and lane bots that reach the end of their lane march on the enemy Titan. While a Titan takes damage, its team respawns twice as fast.
+  - A Titan's death calls `RoundService.finish`. Health and alerts replicate as attributes on `ReplicatedStorage.Structures`.
+  - Greybox markers for guardians and the Titan were removed.
+- **NPC separation:** rows that cannot be pushed (monsters, the dummy) take no part, so bots pass through guardians as players do. Before this, lane bots piled up on their own guardians.
+- **Client:**
+  - `NpcRenderController` draws monsters from their definitions (body, head, glowing eyes, arms, team band, Titan crown), shows state (wind-up lean and raised arms with red eyes, swing, stagger slump) and sinks defeated monsters into the ground.
+  - `MonsterFxController` draws telegraphs as a faint outline of the full area plus a bright fill growing from the origin until impact: circles, cones built from wedge triangles, and lines and fans for bolts. Hostile shapes are red-orange; your own guardians' shapes are faint blue. It also draws impact flashes, locally simulated bolts, phase toasts and stagger toasts.
+  - `StructureController` reads the structure attributes, draws ruins and toasts on destruction.
+- **HUD:** guardian pips (outer and inner per lane: bright, faded while locked, dark when destroyed) and a Titan health bar under each team block, outlined red while that Titan is under attack. A boss bar for the nearest large monster within 60 studs shows its name, phase, health, stagger bar and LOCKED or STAGGERED. Minimap lane status uses the same colours. The kill feed names monsters with their team ("Blue Outer Guardian").
+- **Round summary v1:** `RoundStatsService` tracks kills, deaths, assists, damage, structure damage, minion credit and structures destroyed per player, and sends `RoundSummary` at Ending. The screen shows victory or defeat, round and duration, the stats, team kills and structures destroyed, and the MVP, then closes itself when the next round starts.
+- **Acceptance, full round with bots:** structures at 10% health (`/structurehp 0.1`), 18 Red lane bots plus waves. They destroyed all six Blue guardians in lane order and took the Titan from 100% to 40% (it fought back through its phases). I landed the last 400 damage with `/hitstructure` to finish it. The round then went to Ending with Red the winner, the summary appeared, and on Starting round 2 every structure was back at full health with the summary closed. Not yet run with human testers.
+- **Acceptance, telegraphs can be avoided:** `/avoidtest` runs a reactor bot against a monster in the gym. The bot moves between three distances and, 0.25 s after a telegraph covers it, walks straight out of the shape or dodges through the impact.
+  - Outer guardian, walking: 27 of 27 avoided.
+  - Outer guardian, dodging: 27 of 27 avoided.
+  - Titan in phase 3 (30% health), dodging: 48 of 48 avoided.
+  - Control run, standing still: 12 hits from 14 telegraphs.
+  - Walking alone does not beat the Titan's wide sweep, three-bolt volley or 22-stud quake; this is by design and recorded in the decision log.
+  - Guardian sweep telegraphs were lengthened from 0.8 s to 0.9 s so their worst-case escape (about 9 studs) is walkable after a reaction.
+  - Not yet confirmed by human players.
+- **Acceptance, no damage out of order:** `/hitstructure` showed an inner guardian and the Titan missing ("protected") while the lane's outer guardian lived. Killing the top outer guardian opened only the top inner guardian; the middle one stayed locked. Killing the top inner guardian opened the Titan.
+- **Performance gate:** Phase 5 load test plus `/siege` (a stationary enemy target next to every structure, so all 14 stay awake and attack nonstop).
+  - Development PC: 720 minions and 54 NPCs. Minion tick 0.89 ms per frame (worst 1.24), NPCs and monsters 0.10 ms, bolts 0.011 ms; minion snapshots 24 KB/s.
+  - Approximated low-end PC (2 cores, graphics level 1, restored afterwards): 576 minions. Minion tick 1.04 ms (worst 1.43), NPCs and monsters 0.17 ms, bolts 0.013 ms, about 1.25 ms in all. Server held 60 Hz; client held 60 FPS (worst frame 18.7 ms); minion snapshots 20 KB/s.
+- **Dev commands:** `/monster [id]`, `/avoidtest id [walk|dodge|stand] [seconds] [health%]`, `/structures`, `/hitstructure key [n]`, `/killstructure key`, `/structurehp [x]`, `/resetstructures`, `/siege`, `/lanebots team [n]`.
+- **Carried forward:**
+  - Human-tester round and avoidance checks, and provocation seen live, go into the multi-client session.
+  - Kills by minions still count towards team kills (as in Phase 5).
+  - Ragdoll and telegraph art are placeholders (Phase 13).
 
 ---
 
 ## Phase 7: Jungle camps and monster kit
 
-**Status:** Not Started
+**Status:** Complete
 
 **Goal:** Jungle fights that are fun in their own right, built from a reusable kit.
 
 **Tasks**
 
-- [ ] Attack primitives, part two: charge, summon, grab-and-throw, burrow.
-- [ ] Monster definition format: stats, two primitives, one signature mechanic, model and animation references, egg type.
-- [ ] Three monster types, each with a distinct signature (examples: takes damage only from behind; splits into two on death; burrows and resurfaces under a player).
-- [ ] Camp controller: spawn group, leash range, reset when players leave, respawn timer.
-- [ ] Camp difficulty tiers by distance from base, with the centre camps the hardest.
-- [ ] Egg drop on clear (pickup only; carrying arrives in Phase 8).
-- [ ] Group scaling: camp health scales mildly with the number of attackers so groups are faster but not trivial.
-- [ ] Camp sleep when no player is near.
-- [ ] Minimap: camp alive and respawn indicators.
-- [ ] Authoring tool: grow the Phase 3 combat gym (dev-only, in the main place) so it can spawn any monster definition for isolated tuning.
+- [x] Attack primitives, part two: charge, summon, grab-and-throw, burrow.
+- [x] Monster definition format: stats, two primitives, one signature mechanic, model and animation references, egg type.
+- [x] Three monster types, each with a distinct signature (examples: takes damage only from behind; splits into two on death; burrows and resurfaces under a player).
+- [x] Camp controller: spawn group, leash range, reset when players leave, respawn timer.
+- [x] Camp difficulty tiers by distance from base, with the centre camps the hardest.
+- [x] Egg drop on clear (pickup only; carrying arrives in Phase 8).
+- [x] Group scaling: camp health scales mildly with the number of attackers so groups are faster but not trivial.
+- [x] Camp sleep when no player is near.
+- [x] Minimap: camp alive and respawn indicators.
+- [x] Authoring tool: grow the Phase 3 combat gym (dev-only, in the main place) so it can spawn any monster definition for isolated tuning.
 
 **Acceptance tests**
 
@@ -484,30 +555,84 @@ _None yet._
 
 **Implementation notes**
 
-_None yet._
+- **Definition format:** `src/shared/Monsters/Types.luau` defines a monster type:
+  - stats;
+  - attacks built from seven primitives;
+  - an optional signature (`armoredFront`, `splits`, `burrower`) with its data;
+  - `egg` type;
+  - `model` and `animations` asset references (nil until Phase 13);
+  - a placeholder `look` (blocky, blob, shell, worm with a colour).
+
+  Each type is one file in `src/shared/Monsters/`, listed in its `init.luau`; `Config.monsters` points at that index. Phase 6's guardians, Titan and slammer moved there unchanged.
+- **Attack primitives, part two** (MonsterService):
+  - charge: a line telegraph as wide as the monster, ending inside its leash; then the monster dashes along it at the attack speed, hitting each body once. It runs through the same per-frame swept-segment loop as bolts, with the monster carried along.
+  - summon: calls `count` monsters of a type, at most `max` alive per summoner; they join the summoner's camp.
+  - grab: a small circle at the target; the body nearest its centre is hit and thrown away from the monster (heavy).
+  - burrow: the monster goes underground at once (hidden, gated, invulnerable; new snapshot state `hidden`), and its eruption circle is drawn where the target stood, inside the leash. At impact it surfaces there with a heavy circle hit.
+- **Three jungle types**, each with two primitives and a signature:
+  - Shellback: bite (sweep) and charge. Armoured front: hits from its front half do no damage and show "Blocked". It only turns while idle, so its charge carries it past you with its back open during a 2 s recovery.
+  - Splitter: self slam and calling splitlings. Splits into two splitlings on death; the camp is cleared only when every piece is dead.
+  - Burrower: burrow and grab. Underground and untouchable for much of the fight; hit it after it surfaces.
+- **Camps:**
+  - `Shared.Combat.Camps` (pure, 6 new tests, 148 in total) gives 12 camps from the map markers. Tier by distance from the centre line: tier 3 within 180 studs, tier 2 within 350, tier 1 beyond.
+  - Each quadrant has one of each type, so every type appears at every tier.
+  - Tiers scale health x1, x1.4, x1.9 and damage x1, x1.15, x1.3; they respawn after 60, 75 and 90 s and drop common, rare and epic eggs.
+  - `CampService` spawns each camp's monster, tracks members (summons and split pieces join through `MonsterService.spawned`) and clears on the last death through `MonsterService.died`. On clear it drops the egg, publishes the respawn time as an attribute on `ReplicatedStorage.Camps`, and respawns on the timer.
+  - Leash: camp monsters walk home past 45 studs.
+  - Reset: a damaged camp with no player or bot within 55 studs for 6 s respawns fresh.
+  - Group scaling: health grows by 15% per distinct attacker in the last 6 s beyond the first, up to x1.6, and never shrinks mid-fight. This is unit tested; seeing it live needs more than one attacker.
+  - Sleep: camp monsters use monster sleep; the camp itself ticks once a second.
+- **Eggs (pickup only):** `EggService` drops a glowing egg (colour by rarity) with a hold-to-pick-up prompt. Pickup is validated on the server (alive, within 12 studs) and counted in the `EggsCollected` attribute. Eggs disappear after 90 s and are cleared on round reset. Phase 8 adds carrying.
+- **Client:**
+  - Placeholder looks per type: translucent blob with a core, shell on a low body, worm with a glowing maw.
+  - Burrowed monsters sink out of sight.
+  - Charge telegraphs reuse the line shape.
+  - Zero-damage hits read "Blocked".
+  - The minimap shows each camp as a purple dot sized by tier, or grey with a seconds countdown while respawning.
+  - Jungle kills stay out of the kill feed.
+- **Acceptance, solo outer camp in about 30 s:** `/cleartest index [level]` runs a duelist bot with stubbed level-20 Knight stats (x1.12). It uses the player melee path, stands behind Shellbacks and dodges every telegraph that covers it. Outer camps, from the first hit:
+  - Splitter: 29.8 s.
+  - Burrower: 25.1 s.
+  - Shellback: 69.4 s at first. After cutting its health from 600 to 280 and lengthening its post-charge recovery from 1.8 to 2 s, it took 27.8 s.
+  - The duelist took no damage, so a human will be slower; recheck in the fun session.
+- **Acceptance, a new type needs only a definition file:** the three jungle types and the splitling were added as files plus index lines. Spawning, camps, telegraphs, models and minimap needed no type-specific code.
+- **Acceptance, each type needs a different approach:** by design (flank the Shellback, thin the splitlings, keep moving against the Burrower). Needs human playtesters (fun session).
+- **Also verified:**
+  - All 12 camps spawned with the tier scaling.
+  - Clearing dropped an egg and the camp respawned on its timer.
+  - Holding E on the egg picked it up.
+  - Camp 10, left damaged (204/380), reset to full once nobody was near.
+- **Performance gate (approximated low-end PC, 2 cores, graphics level 1, restored afterwards):** Phase 5 load test plus `/siege`, now with a target at every camp too, so 38 monsters stayed awake (14 structures, 12 camps, summons and split pieces).
+  - Load: 684 minions and 40 lane bots.
+  - Simulation per frame: minion tick 1.62 ms (worst 2.44), NPCs and monsters 0.26 ms, bolts and charges 0.017 ms, about 2.0 ms in all.
+  - Server held 60 Hz; client held 60 FPS (worst frame 19.2 ms); minion snapshots 20 KB/s.
+- **Fixes along the way:**
+  - `/loadtest` cleared camp monsters, which left camps stuck; camp monsters are now persistent like structures.
+  - Dev chat replies were capped at 500 characters; the limit is now 2000.
+- **Dev commands:** `/camps`, `/gocamp index`, `/cleartest index [level] [timeout]`, `/resetcamps`; `/monster id` spawns any type in the gym (the authoring tool).
 
 ---
 
 ## Phase 8: Eggs and hatcheries
 
-**Status:** Not Started
+**Status:** Complete
 
 **Goal:** The full egg loop inside a round: carry, incubate, raid, and unleash.
 
 **Tasks**
 
-- [ ] Egg entity: type, rarity, owner, state (dropped, carried, incubating, hatched).
-- [ ] Pickup and carry: carrier is slowed, cannot dodge, is marked on the enemy minimap when seen, and drops the egg on death.
-- [ ] Dropped egg rules: who can pick it up, despawn timer.
-- [ ] Hatchery: fixed number of slots, deposit interaction, incubation timer by rarity, visible glowing eggs in slots.
-- [ ] Raiding: an enemy player inside the hatchery can channel to take an incubating egg, then must carry it home to restart incubation.
-- [ ] Hatchery access rule: raidable only after that lane's outer guardian is dead (decide and record; alternative is always raidable but guarded).
-- [ ] Hatch prompt for the owner with the three choices; claim and feed are stubbed until Phase 9.
-- [ ] Unleash: spawns the monster as an allied lane unit at that hatchery, using its camp definition scaled for lane use.
-- [ ] Offline or absent owner: auto-unleash after a timeout.
-- [ ] Round reset clears all eggs.
-- [ ] HUD: carry indicator, hatchery slot display, incubation timers, hatch prompt, raid alert for the defending team.
-- [ ] Anti-abuse: movement speed validation on carriers, interaction range and rate checks.
+- [x] Egg entity: type, rarity, owner, state (dropped, carried, incubating, hatched).
+- [x] Pickup and carry: carrier is slowed, cannot dodge, is marked on the enemy minimap when seen, and drops the egg on death.
+- [x] Dropped egg rules: who can pick it up, despawn timer.
+- [x] Hatchery: fixed number of slots, deposit interaction, incubation timer by rarity, visible glowing eggs in slots.
+- [x] Raiding: an enemy player inside the hatchery can channel to take an incubating egg, then must carry it home to restart incubation.
+- [x] Hatchery access rule: raidable only after that lane's outer guardian is dead (decide and record; alternative is always raidable but guarded).
+- [x] Hatch prompt for the owner with the three choices; claim and feed are stubbed until Phase 9.
+- [x] Unleash: spawns the monster as an allied lane unit at that hatchery, using its camp definition scaled for lane use.
+- [x] Offline or absent owner: auto-unleash after a timeout.
+- [x] Round reset clears all eggs.
+- [x] HUD: carry indicator, hatchery slot display, incubation timers, hatch prompt, raid alert for the defending team.
+- [x] Anti-abuse: movement speed validation on carriers, interaction range and rate checks.
 
 **Acceptance tests**
 
@@ -519,36 +644,65 @@ _None yet._
 
 **Implementation notes**
 
-_None yet._
+- **Rules (pure, `Shared.Eggs`, 7 new tests, 155 in total):** incubation by rarity (60, 120, 180, 240 s), unleash scale by rarity (x1, 1.3, 1.6, 2), who can pick up (dropped eggs only, anyone), deposit (own team's hatchery with a free slot), raid (enemy, empty hands, an incubating egg, outer guardian dead), raid pick (the egg closest to hatching), and the carrier movement limit. Numbers live in `Config.eggs`.
+- **Eggs (`EggService`):** each egg is one server part, tagged `Egg` for clients, with attributes for state, kind, rarity, team, carrier, hatchery and end time.
+  - States: dropped, carried, incubating, hatched.
+  - Pickup: a hold prompt, checked on the server (alive, within 12 studs, rate limit).
+  - Carrying: the egg is welded to the carrier's back. Carriers walk at 70% (a `CharacterService.speedScale` hook) and cannot dodge (a `CombatService.canDodge` hook, and the client refuses too).
+  - A carrier who dies or leaves drops the egg where they were. Dropped eggs vanish after 90 s, and every egg is cleared on round reset.
+- **Hatcheries:**
+  - One per lane per team at the map markers (the greybox pads were removed): a pad with a glowing core and four slots.
+  - Deposit prompt for your own team; steal prompt (hold F for 3 s) for enemies. Each client shows a prompt only where it applies, and the server checks range, state, team, free slots and the rate limit.
+  - The depositor owns the egg. Incubating eggs sit on the slots with a countdown label; hatchery labels show free slots, or raidable/guarded to enemies.
+  - Raid alerts go to the defending team when the hold starts. A raid takes the egg closest to hatching, and the raider carries it home, where incubation starts over.
+- **Hatching:**
+  - The owner gets `HatchReady` and a dialog: claim as pet, feed to pet, or unleash on lane, with a 30 s countdown. Keyboard and gamepad navigation work (tested with arrows and Enter).
+  - No choice in time, or an absent owner, unleashes it.
+  - Claim and feed are recorded as `EggsClaimed` and `EggsFed` player attributes until Phase 9 adds pets (decision log).
+- **Unleashed monsters (lane units):** the egg's monster definition spawns at the hatchery with the rarity scale and `lane` set. With nothing to fight it marches its lane, re-finding its place on the lane after a chase as minions do. It fights whatever is hostile in range and besieges the enemy Titan at the end. Lane units never sleep, ignore leash and are removed on round reset.
+- **Carriers on the minimap:** teammates carrying an egg show as gold dots. Enemy carriers show as red dots while any teammate is within 150 studs.
+- **HUD:** a carry pill above the abilities ("rare shellback egg · slowed, no dodge · take it to your hatchery"), toasts for picking up and for raids, world labels on eggs and hatcheries, and the hatch dialog.
+- **Anti-abuse:** carriers are position-checked every 0.5 s against the slowed walk speed plus slack; a carrier who moves too far is put back. A carrier hit in the last 1.5 s is skipped so knockback is not punished. Verified: an 80-stud teleport while carrying was undone ("moved too fast while carrying an egg; put back").
+- **Acceptance, camp to hatchery to lane:** a duelist cleared camp 10 (29.3 s) and it dropped a common Splitter egg. I picked it up (walk speed 16 to 11.2), walked to my team's bottom hatchery, deposited it (incubating, 1:00 countdown, 3 of 4 slots free) and finished incubation with `/hatchnow`. The hatch dialog appeared and I chose "Unleash on lane". The Splitter spawned at the hatchery and marched west along the bottom lane at its walk speed (275 to 227 on x in 6 s).
+- **Acceptance, raid and re-incubate:** I deposited a rare Burrower egg at Red's bottom hatchery and destroyed Red's bottom outer guardian (the hatchery turned raidable). On Blue, I stole the egg with the 3 s hold, walked it to Blue's bottom hatchery and deposited it; incubation restarted there at the full 120 s.
+- **Acceptance, carrier death:** carrying an epic Shellback egg next to an enemy guardian, I was killed; the egg dropped where I died in the dropped state, which anyone can pick up.
+- **Performance gate (approximated low-end PC, 2 cores, graphics level 1, restored afterwards):** Phase 5 load test plus `/siege` plus `/unleash 20`.
+  - Load: 576 minions, 145 NPCs, 79 monsters (58 awake).
+  - Simulation per frame: minion tick 1.55 ms (worst 2.21), NPCs and monsters 0.28 ms, bolts and charges 0.026 ms, about 1.9 ms in all.
+  - Server held 60 Hz; client held 60 FPS (worst frame 18.3 ms); server send 23 KB/s.
+- **Carried forward:**
+  - NPC snapshots go to every client unfiltered (about 14.5 KB/s at 145 NPCs). Add interest filtering like minions' if NPC counts grow (Phase 11 or 13B).
+  - Seeing a raid alert and enemy carrier markers needs a second player (multi-client session).
+- **Dev commands:** `/egg [kind] [rarity]`, `/eggs`, `/gohatchery key`, `/hatchnow key`, `/unleash [n]`. `/killstructure` now works on your own team's structures too.
 
 ---
 
 ## Phase 9: Persistence, levels, and pets
 
-**Status:** Not Started
+**Status:** Complete
 
 **Goal:** Progress that carries across rounds and sessions.
 
 **Tasks**
 
-- [ ] Profile schema v1: a per-class map of level and XP, last active class, pets (up to three, each with type, pet XP, cosmetic), active pet, gold, cosmetics owned, settings, statistics. Pets, pet XP, gold and cosmetics are account-wide.
-- [ ] Data store names namespaced by environment from `Config` (for example a `dev_` prefix in Studio), so Studio sessions in the main place never read or write live player data.
-- [ ] Session-locked load and save with retry, autosave, save on leave, and schema migration support.
-- [ ] Failure handling: if a profile cannot load, the player is told and is not allowed to play on an empty profile.
-- [ ] XP sources: minions, monsters, guardians, player kills and assists, objectives, round completion. All XP awards go to the active class (wired to the Phase 5 credit events).
-- [ ] Level curve and stat function per Appendix A, driven by the active class level; stats flatten, level number does not cap.
-- [ ] Account level: the sum of class levels, shown on the nameplate with the class level.
-- [ ] Unlocks split by level type: class level unlocks abilities and class milestone looks; account level unlocks the second and third pet slots and titles.
-- [ ] Catch-up XP: a class below the player's highest class level earns double XP (multiplier in Config) until it reaches that level, with a unit test covering below, at and crossing the threshold.
-- [ ] Claim: add hatched monster to the stable; if full, choose one to replace.
-- [ ] Feed: convert the hatched monster to pet XP on a chosen pet, with a bonus for matching type.
-- [ ] Pet stat curve per Appendix A.
-- [ ] Set `TeamService.powerOf` from each player's combat multiplier (active class level multiplier times active pet multiplier, Appendix A), and refresh team strength when a player levels, switches class, or switches pet.
-- [ ] Active pet in the world: follows the owner, auto-attacks, uses its signature move on a cooldown; simulated in the same data pipeline as minions.
-- [ ] Switching the active pet at base.
-- [ ] Unleash reward: level XP to the owner based on what the unleashed monster achieves.
-- [ ] UI: level-up moment, XP bar, pet stable screen, pet detail, hatch choice screen with comparison.
-- [ ] Data tooling: wipe and edit a test profile from developer commands.
+- [x] Profile schema v1: a per-class map of level and XP, last active class, pets (up to three, each with type, pet XP, cosmetic), active pet, gold, cosmetics owned, settings, statistics. Pets, pet XP, gold and cosmetics are account-wide.
+- [x] Data store names namespaced by environment from `Config` (for example a `dev_` prefix in Studio), so Studio sessions in the main place never read or write live player data.
+- [x] Session-locked load and save with retry, autosave, save on leave, and schema migration support.
+- [x] Failure handling: if a profile cannot load, the player is told and is not allowed to play on an empty profile.
+- [x] XP sources: minions, monsters, guardians, player kills and assists, objectives, round completion. All XP awards go to the active class (wired to the Phase 5 credit events).
+- [x] Level curve and stat function per Appendix A, driven by the active class level; stats flatten, level number does not cap.
+- [x] Account level: the sum of class levels, shown on the nameplate with the class level.
+- [x] Unlocks split by level type: class level unlocks abilities and class milestone looks; account level unlocks the second and third pet slots and titles.
+- [x] Catch-up XP: a class below the player's highest class level earns double XP (multiplier in Config) until it reaches that level, with a unit test covering below, at and crossing the threshold.
+- [x] Claim: add hatched monster to the stable; if full, choose one to replace.
+- [x] Feed: convert the hatched monster to pet XP on a chosen pet, with a bonus for matching type.
+- [x] Pet stat curve per Appendix A.
+- [x] Set `TeamService.powerOf` from each player's combat multiplier (active class level multiplier times active pet multiplier, Appendix A), and refresh team strength when a player levels, switches class, or switches pet.
+- [x] Active pet in the world: follows the owner, auto-attacks, uses its signature move on a cooldown; simulated in the same data pipeline as minions.
+- [x] Switching the active pet at base.
+- [x] Unleash reward: level XP to the owner based on what the unleashed monster achieves.
+- [x] UI: level-up moment, XP bar, pet stable screen, pet detail, hatch choice screen with comparison.
+- [x] Data tooling: wipe and edit a test profile from developer commands.
 
 **Acceptance tests**
 
@@ -560,7 +714,51 @@ _None yet._
 
 **Implementation notes**
 
-_None yet._
+- **Pure modules (14 new tests, 169 in total):**
+  - `Shared.Progression`:
+    - XP curve: 100 + 25 (L - 1)^1.2 per level, never capped.
+    - XP awards with catch-up, tested below, at and crossing the threshold.
+    - Account level, pet slots (account level 1, 15 and 40), titles.
+    - Pet multiplier: 1 + 0.2 x / (x + 2000).
+    - Combat power, and feed XP with a x1.5 same-type bonus.
+  - `Shared.Profile`: schema v1, migration step list, fill-in of missing fields, refusal of newer versions, pet add and replace.
+  - `Shared.SessionLock`: claim, refresh and release on an injected atomic update, stale takeover, and saves refused once the lock is lost; with an in-memory store.
+- **DataService:**
+  - The store is named per environment (`dev_profiles_v1` in Studio, `test_` in test, unprefixed live).
+  - Load on join retries with backoff. If the profile is still locked or failing, the player is kicked with a message, never given an empty profile, and players cannot spawn until loaded.
+  - Saves: autosave every 60 s (refreshing the lock), save and release on leave, and save everyone on shutdown.
+  - Without data store access in dev or test it falls back to an in-memory store with a warning; never in production.
+- **ProgressionService:**
+  - XP to the active class from every source: minion credit, camp monsters (shared by attackers), camp clears (by tier), structures (attacking team within 120 studs), kills and assists, egg deposits, raids and hatches, round win or loss, and damage dealt by your unleashed monsters.
+  - Level-ups update max health and damage at once, and team strength via the new `TeamService.refresh`.
+  - `TeamService.powerOf` and `CombatService.classLevelOf` now read profiles.
+  - Player attributes feed the HUD and nameplates (class level, account level, title).
+- **Pets:**
+  - Claim and feed replace the Phase 8 stub; a claim with a full stable replaces the pet you pick.
+  - `PetService` spawns the active pet as a monster at 45% size, with 30% of the type's damage times its pet multiplier. It follows its owner, fights hostiles within 22 studs of them, teleports back if left 60 studs behind, and is untargetable (decision log).
+  - Switching the active pet is checked to be in your own base.
+  - Fixed in testing: pets were held to a leash around their spawn point, and a Splitter pet's summon (range 25) kept it from closing in. Pets now ignore leash, never summon, and get a summon-free copy of their definition.
+- **UI:**
+  - XP bar under the health bar.
+  - Level-up moment: a big "LEVEL n" banner, toast, flash and sound.
+  - Nameplates show class level, account level and title.
+  - Pet stable screen (K or the paw button): slots, pet XP, power bonus bar, make active.
+  - The hatch dialog lists your pets for comparison, shows each pet's feed XP, and picks the pet to feed or replace.
+  - Pets have no health bar and no boss bar.
+- **Data tooling (dev):** `/profile`, `/wipeprofile`, `/setlevel n`, `/addxp n`, `/addpet kind [xp]`, `/maxprofile`, `/savenow`, `/locktest`, `/petdebug`, `/pets n`.
+- **Acceptance, persistence:** with Studio API access on, I set Knight level 12 with 60 XP and a Shellback pet with 777 XP, then stopped the server. On the next start the profile loaded at once with everything intact, so the shutdown save wrote the profile and released the lock.
+- **Acceptance, one server at a time:** `/locktest` (a second session loading the profile) was refused ("locked by" this server's session) on the real data store. Unit tests cover the release and stale-takeover cases.
+- **Acceptance, 1.5x ceiling:** a maxed profile (level 500, pet XP 10,000,000) measures power 1.488. Health and damage both scale by power, and team strength uses it too (unit test: never above 1.5).
+- **Also verified:**
+  - 250 XP took a Knight from level 1 to 3 with 25 XP left over, and max health rose to 102.
+  - Feeding a rare Splitter egg to a Splitter pet gave 600 pet XP (1500 to 2100, power x1.102), and the class got 70 XP for the deposit and hatch.
+  - The pet damaged camp monsters without the owner attacking.
+- **Performance gate (approximated low-end PC):** Phase 8 load plus `/pets 40`.
+  - Load: 120 monsters (99 awake), 186 NPCs, 576 minions.
+  - Simulation: about 1.6 ms per frame.
+  - Server held 60 Hz; client held 60 FPS (worst frame 19.1 ms).
+  - Server send: 32.5 KB/s before filtering NPC snapshots by distance, 21.9 KB/s after (development PC rerun).
+- **Carried forward:** the unleash reward is XP from damage dealt; kill-based bonuses could come in Phase 11 balance.
 
 ---
 
@@ -885,3 +1083,17 @@ Record decisions here as they are made, with the date and the reason.
 | 2026-11-22 | Fun gate target age range is 9 to 14 | Matches the intended audience |
 | 2026-11-22 | Mobile and console work split into Phase 13B | Phase 13 was too large; keeps the platform pass separate from polish |
 | 2026-11-22 | Team balance is headcount plus strength (sum of member power); joins and reshuffles favour the weaker team; the gap drives capped Phase 11 equalisers | Levels make headcount alone misleading; balance should nudge matches towards even without making high levels meaningless |
+| 2026-11-22 | Fun gate deferred; Phase 4 starts while Phase 3 stays In Progress | Owner chose to keep building; the gate still runs before launch work depends on combat feel |
+| 2026-11-22 | UI framework is Fusion 0.3 | Small, Luau-native, built-in springs for motion; React-lua is heavier with weaker strict typing |
+| 2026-11-22 | Structures cannot be damaged outside the Active phase | Nothing is decided before a round starts (bots or players fighting during Intermission) |
+| 2026-11-22 | Guardians are fully escapable on foot; the Titan's sweep, volley and quake are dodge checks | Guardians stay fair for new players; the Titan asks for the dodge skill |
+| 2026-11-22 | Kills by guardians, Titans and other monsters do not count towards team kills | Team kills measure the teams' own fights |
+| 2026-11-22 | Monster types are one definition file each in `src/shared/Monsters`, listed in its index | A new type needs a file and assets, no code; the index line is the only registration |
+| 2026-11-22 | Jungle camps are one monster each (plus its summons or split pieces); tier by distance from the centre line | Keeps each fight readable; tiers put the hardest camps in the contested middle |
+| 2026-11-22 | Camp monsters and structures survive `/clearnpcs` | Dev load tests must not break camp and round bookkeeping |
+| 2026-11-22 | Hatcheries are raidable only after that lane's outer guardian is dead | Raids become a reward for pushing a lane, so new players' eggs are safe early in a round |
+| 2026-11-22 | Until Phase 9, "claim" and "feed" record counters on the player; "unleash" is fully live | The hatch loop is testable end to end now; Phase 9 swaps the stub for pets |
+| 2026-11-23 | Profiles use our own session lock on `UpdateAsync` (Shared.SessionLock) instead of a profile library | Small, pure and unit tested with a fake store; no extra package; the semantics we need (claim, refresh, release, stale takeover) fit in one module |
+| 2026-11-23 | Pets cannot be targeted or damaged, never summon, and run through MonsterService (the monster kit) rather than the minion arrays | Pets need the monster attacks and telegraphs; at most 40 exist; untargetable companions avoid griefing and keep the 1.5x power ceiling the only pet effect on fights |
+| 2026-11-23 | NPC snapshots are filtered per client by the interest radius | Monster and pet counts grew; this cut server send at the full load test from 32.5 to 21.9 KB/s |
+| 2026-11-23 | Launch pads: one per lane in each base, flying the player in an arc to the furthest guardian their team still holds in that lane (outer, then inner; idle once both fall). No attacking or dodging mid-flight; egg carriers cannot launch; the client flies its own character and the server corrects a flight that does not arrive | The map took too long to cross (owner request). Landing at your own guardian keeps launches defensive and never drops you behind enemy lines (Shared.Launchers, LauncherService, LauncherController) |

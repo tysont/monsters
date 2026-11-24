@@ -8,9 +8,33 @@ local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 
+local UiState = require("./UI/UiState")
+
 local Feedback = {}
 
 local DAMAGE_NUMBER_POOL = 24
+
+-- Settings: camera shake is off with reduced motion or low effects; hit flash is off on low.
+local function shakeAllowed(): boolean
+	return not UiState.peek(UiState.settings.reducedMotion)
+		and (UiState.peek(UiState.settings.effectsQuality :: any) :: string) ~= "Low"
+end
+
+local function flashAllowed(): boolean
+	return (UiState.peek(UiState.settings.effectsQuality :: any) :: string) ~= "Low"
+end
+
+-- All effect sounds play through this group; its volume follows the master and SFX sliders.
+local sfxGroup = Instance.new("SoundGroup")
+sfxGroup.Name = "SFX"
+sfxGroup.Parent = SoundService
+local volumeScope = UiState.scope:innerScope()
+volumeScope:Observer(UiState.settings.sfxVolume):onBind(function()
+	sfxGroup.Volume = UiState.peek(UiState.settings.masterVolume) * UiState.peek(UiState.settings.sfxVolume)
+end)
+volumeScope:Observer(UiState.settings.masterVolume):onBind(function()
+	sfxGroup.Volume = UiState.peek(UiState.settings.masterVolume) * UiState.peek(UiState.settings.sfxVolume)
+end)
 local DAMAGE_NUMBER_SECONDS = 0.7
 local FLASH_SECONDS = 0.08
 
@@ -22,6 +46,7 @@ function Feedback.playSound(soundId: string, position: Vector3?, volume: number?
 	sound.SoundId = soundId
 	sound.Volume = volume or 0.6
 	sound.PlaybackSpeed = 0.95 + math.random() * 0.1
+	sound.SoundGroup = sfxGroup
 	if position then
 		local attachment = Instance.new("Attachment")
 		attachment.WorldPosition = position
@@ -54,6 +79,9 @@ local shakeConnection: RBXScriptConnection? = nil
 
 -- Shakes the camera by offsetting the local character's camera, decaying over `duration`.
 function Feedback.shake(strength: number, duration: number)
+	if not shakeAllowed() then
+		return
+	end
 	local t = os.clock()
 	if t + duration > shakeUntil or strength > shakeStrength then
 		shakeStrength = math.max(strength, if t < shakeUntil then shakeStrength else 0)
@@ -82,7 +110,7 @@ end
 
 -- Flashes a model white briefly.
 function Feedback.flash(model: Instance?)
-	if model == nil then
+	if model == nil or not flashAllowed() then
 		return
 	end
 	local highlight = model:FindFirstChild("HitFlash")
@@ -158,7 +186,8 @@ function Feedback.damageNumber(position: Vector3, amount: number, color: Color3)
 	n.busyUntil = t + DAMAGE_NUMBER_SECONDS
 	local jitter = Vector3.new((math.random() - 0.5) * 2, 0, (math.random() - 0.5) * 2)
 	n.attachment.WorldPosition = position + jitter
-	n.label.Text = tostring(math.floor(amount + 0.5))
+	-- A hit that did nothing (an armoured front) reads as "Blocked".
+	n.label.Text = if amount <= 0 then "Blocked" else tostring(math.floor(amount + 0.5))
 	n.label.TextColor3 = color
 	n.label.TextTransparency = 0
 	n.gui.StudsOffsetWorldSpace = Vector3.zero

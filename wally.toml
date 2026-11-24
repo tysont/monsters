@@ -7,6 +7,7 @@ private = true
 
 # Shared packages go to ReplicatedStorage.Packages (see default.project.json).
 [dependencies]
+Fusion = "elttob/fusion@0.3.0"
 
 # Server-only packages go to ServerScriptService.ServerPackages.
 [server-dependencies]

@@ -123,10 +123,19 @@ local function buildMarkers(map: Map.MapData, parent: Instance)
 	local folder = Instance.new("Folder")
 	folder.Name = "Markers"
 	for _, marker in map.markers do
+		-- Guardians and Titans are real monsters (MonsterService) drawn by clients, and hatcheries
+		-- are built by EggService, so they get no greybox marker.
+		if
+			marker.kind == "titan"
+			or marker.kind == "innerGuardian"
+			or marker.kind == "outerGuardian"
+			or marker.kind == "hatchery"
+		then
+			continue
+		end
 		local style = MARKER_STYLES[marker.kind]
-		local color = if marker.kind == "hatchery"
-			then COLORS.hatchery
-			elseif marker.kind == "camp" then COLORS.camp
+		local color = if marker.kind == "camp"
+			then COLORS.camp
 			elseif marker.kind == "minionSpawn" then COLORS.minionSpawn
 			else teamColor(marker.team :: number).Color
 		local name = if marker.team then `T{marker.team}_{marker.lane or "base"}_{marker.kind}` else marker.kind

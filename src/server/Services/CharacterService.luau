@@ -26,6 +26,20 @@ local CharacterService = {
 	activeSeconds = function(): number
 		return 0
 	end,
+	-- Multiplies a player's respawn delay (MonsterService: defenders respawn faster while their
+	-- Titan is under attack).
+	-- Multiplies a player's walk speed (EggService: egg carriers are slowed). Call applyMovement
+	-- after it changes.
+	speedScale = function(_player: Player): number
+		return 1
+	end,
+	-- Whether a player may spawn yet (DataService: only once their profile has loaded).
+	canSpawn = function(_player: Player): boolean
+		return true
+	end,
+	respawnScale = function(_player: Player): number
+		return 1
+	end,
 	-- Fires after a player's character spawns (CombatService sets up health, stats and weapon).
 	characterSpawned = Signal.new() :: Signal.Signal<Player, Model>,
 }
@@ -53,7 +67,7 @@ function CharacterService.applyMovement(player: Player)
 		humanoid.WalkSpeed = 0
 		humanoid.JumpHeight = 0
 	else
-		humanoid.WalkSpeed = MapLayout.walkSpeed * (speedMultipliers[player] or 1)
+		humanoid.WalkSpeed = MapLayout.walkSpeed * (speedMultipliers[player] or 1) * CharacterService.speedScale(player)
 		humanoid.JumpHeight = StarterPlayer.CharacterJumpHeight
 	end
 end
@@ -84,7 +98,7 @@ local scheduleRespawn: (player: Player, character: Model) -> ()
 
 -- Spawns (or respawns) a player at their team base now, cancelling any pending respawn.
 function CharacterService.spawn(player: Player)
-	if player.Parent == nil or TeamService.teamOf(player) == nil then
+	if player.Parent == nil or TeamService.teamOf(player) == nil or not CharacterService.canSpawn(player) then
 		return
 	end
 	spawnTokens[player] = (spawnTokens[player] or 0) + 1
@@ -106,6 +120,7 @@ end
 scheduleRespawn = function(player: Player, character: Model)
 	local token = spawnTokens[player]
 	local delay = Round.respawnDelay(Config.get().respawn, CharacterService.activeSeconds())
+		* CharacterService.respawnScale(player)
 	player:SetAttribute("RespawnAt", serverNow() + delay)
 	task.delay(delay, function()
 		-- Skip if the player left, already respawned, or was respawned by a round reset.

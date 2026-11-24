@@ -16,10 +16,15 @@ LUAU_DIRS := src tests scripts
 setup:
 	rokit install --no-trust-check
 	wally install
+	rojo sourcemap default.project.json --output sourcemap.json
+	lune run scripts/package-types
 	lune run scripts/fetch-types
 
+# Wally packages, plus type re-exports so luau-lsp sees package types (scripts/package-types.luau).
 packages:
 	wally install
+	rojo sourcemap default.project.json --output sourcemap.json
+	lune run scripts/package-types
 
 check: fmt-check lint typecheck test
 
