@@ -91,7 +91,18 @@ local function buildVisual(kind: number, team: number, lod: Lod): Visual
 	local root: BasePart
 	local bar: Frame? = nil
 	local barGui: BillboardGui? = nil
-	if lod == "simple" then
+	local siege = Minions.KIND_NAMES[kind] == "siege"
+	if siege then
+		-- Siege minions (late in a round): a heavy block with a ram.
+		local dark = color:Lerp(Color3.new(0, 0, 0), 0.35)
+		root = newPart("Body", Vector3.new(3.2, HEIGHT, 3.2), dark, model)
+		table.insert(parts, root)
+		if lod ~= "simple" then
+			local ram = newPart("Ram", Vector3.new(1.2, 1.2, 2.6), Color3.fromRGB(120, 90, 60), model)
+			ram:SetAttribute("Offset", CFrame.new(0, 0, -2.6))
+			table.insert(parts, ram)
+		end
+	elseif lod == "simple" then
 		root = newPart("Body", Vector3.new(1.8, HEIGHT, 1.8), color, model)
 		table.insert(parts, root)
 	else
@@ -358,7 +369,7 @@ function MinionRenderController.nameOf(combatantId: number): string?
 	end
 	local m = minions[id]
 	local kind = if m then Minions.KIND_NAMES[m.kind] else nil
-	return if kind == "ranged" then "Ranged minion" else "Minion"
+	return if kind == "ranged" then "Ranged minion" elseif kind == "siege" then "Siege minion" else "Minion"
 end
 
 function MinionRenderController.start(_self: typeof(MinionRenderController))

@@ -27,6 +27,7 @@ local Net = require(ReplicatedStorage.Shared.Net)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Round = require(ReplicatedStorage.Shared.Round)
 local SpatialGrid = require(ReplicatedStorage.Shared.Combat.SpatialGrid)
+local Status = require(ReplicatedStorage.Shared.Combat.Status)
 
 local CombatService = require("./CombatService")
 local RoundService = require("./RoundService")
@@ -55,6 +56,14 @@ local MinionService = {
 	-- The Titan minions attack once they reach the end of their lane (set by MonsterService).
 	siegeTarget = function(_team: number): CombatService.Entry?
 		return nil
+	end,
+	-- Phase 11 (BalanceService): multiplies a team's new minions' health and damage
+	-- (equalisers, escalation, the jungle boss buff), and how many siege minions join each wave.
+	strengthOf = function(_team: number): number
+		return 1
+	end,
+	siegeCount = function(): number
+		return 0
 	end,
 }
 
@@ -193,16 +202,19 @@ local function spawnMinion(lane: MapLaneId, team: number, kindName: string, late
 	local combatant = entry.combatant
 	combatant.id = Minions.combatantId(id)
 	combatant.team = team
-	combatant.maxHealth = cfg.maxHealth
-	combatant.health = cfg.maxHealth
+	local strength = math.max(0.1, MinionService.strengthOf(team))
+	combatant.maxHealth = cfg.maxHealth * strength
+	combatant.health = combatant.maxHealth
 	combatant.defence = 0
 	combatant.alive = true
+	combatant.statuses = nil
+	table.clear(combatant.supporters)
 	combatant.invulnerableUntil = -math.huge
 	combatant.protected = false
 	combatant.lastDamagedAt = -math.huge
 	table.clear(combatant.contributors)
 	entry.radius = cfg.radius
-	entry.damage = cfg.damage
+	entry.damage = cfg.damage * strength
 	entry.history.count = 0
 	CombatService.register(entry)
 	SpatialGrid.update(interestGrid, id, p.x, p.z)
@@ -255,6 +267,11 @@ function MinionService.spawnWave()
 	local stagger = config().spawnStagger
 	-- Big load-test waves come out in rows of up to 6 abreast.
 	local perRow = math.min(#plan, 6)
+	local siege = math.max(0, math.floor(MinionService.siegeCount()))
+	for _ = 1, siege do
+		table.insert(plan, "siege")
+	end
+	perRow = math.min(#plan, 6)
 	for _, lane in Map.get().lanes do
 		for team = 1, 2 do
 			for i, kind in plan do
@@ -318,6 +335,21 @@ end
 local function tickSlot(slot: number, t: number, dt: number)
 	local cfg = kindConfig(kindOf[slot])
 	local entry = entryOf[slot]
+	-- Status effects: stunned minions stand still; slows scale their speed; a taunt forces
+	-- their target. Most minions have none (statuses is nil), which costs one check.
+	local statuses = entry.combatant.statuses
+	local speed = cfg.speed
+	if statuses then
+		if Status.stunned(statuses, t) then
+			return
+		end
+		speed *= Status.speedMultiplier(statuses, t, Config.get().classes.status)
+		local taunter = Status.taunter(statuses, t)
+		if taunter and targetOf[slot] ~= taunter and CombatService.entry(taunter) then
+			targetOf[slot] = taunter
+			retargetAt[slot] = t + RETARGET_SECONDS
+		end
+	end
 
 	-- Current target, re-chosen every half second or when it disappears.
 	local target = if targetOf[slot] ~= 0 then CombatService.entry(targetOf[slot]) else nil
@@ -339,7 +371,7 @@ local function tickSlot(slot: number, t: number, dt: number)
 			face(slot, dx, dz)
 			local gap = d - target.radius - entry.radius
 			if gap > cfg.attackRange then
-				local step = math.min(cfg.speed * dt, gap - cfg.attackRange * 0.8)
+				local step = math.min(speed * dt, gap - cfg.attackRange * 0.8)
 				xOf[slot] = x + dx / d * step
 				zOf[slot] = z + dz / d * step
 				stateOf[slot] = S.walk
@@ -347,7 +379,7 @@ local function tickSlot(slot: number, t: number, dt: number)
 				stateOf[slot] = S.fight
 				if t - lastAttackOf[slot] >= cfg.attackCooldown then
 					lastAttackOf[slot] = t
-					CombatService.applyHit(entry.combatant.id, target.combatant.id, cfg.damage, "minion", nil, t)
+					CombatService.applyHit(entry.combatant.id, target.combatant.id, entry.damage, "minion", nil, t)
 				end
 			end
 			return
@@ -370,14 +402,14 @@ local function tickSlot(slot: number, t: number, dt: number)
 		local bx, bz = back.x - x, back.z - z
 		local bd = math.sqrt(bx * bx + bz * bz)
 		if bd > 1e-3 then
-			local step = math.min(cfg.speed * dt, bd)
+			local step = math.min(speed * dt, bd)
 			xOf[slot] = x + bx / bd * step
 			zOf[slot] = z + bz / bd * step
 			face(slot, bx, bz)
 		end
 		return
 	end
-	distanceOf[slot] += dir * cfg.speed * dt
+	distanceOf[slot] += dir * speed * dt
 	if Minions.reachedEnd(distanceOf[slot], path.length, team) then
 		-- Past the lane end: besiege the enemy Titan, or leave if there is none.
 		distanceOf[slot] = if dir > 0 then path.length else 0
@@ -531,6 +563,13 @@ local function snapshot()
 	end
 end
 
+local lastSummary: { Remotes.WaveInfo } = {}
+
+-- The latest per-lane, per-team minion counts and fronts (telemetry: lane control).
+function MinionService.waveInfo(): { Remotes.WaveInfo }
+	return lastSummary
+end
+
 local function summary()
 	local map = Map.get()
 	local infos: { Remotes.WaveInfo } = {}
@@ -554,6 +593,7 @@ local function summary()
 			info.front = math.max(info.front, math.clamp(progress, 0, 1))
 		end
 	end
+	lastSummary = infos
 	Net.fireAllClients(Remotes.WaveSummary, infos)
 end
 
@@ -575,6 +615,7 @@ function MinionService.init(_self: typeof(MinionService))
 		deadAt[slot] = now()
 		-- Proximity credit: hostile players nearby (no last-hit needed).
 		local credit = config().creditRadius
+		CombatService.creditedNear:fire(Vector3.new(xOf[slot], 0, zOf[slot]), teamOf[slot], credit)
 		local team = teamOf[slot]
 		for _, player in Players:GetPlayers() do
 			local entry = CombatService.entry(player.UserId)

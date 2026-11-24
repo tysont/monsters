@@ -212,6 +212,21 @@ function MonsterBrain.update(
 	return { kind = "telegraph", attack = attack, endsAt = brain.stateEndsAt }
 end
 
+-- Interrupts the monster for `seconds` (a stun): any telegraph or attack in progress is cancelled
+-- and it recovers, so damage in the meantime fills its stagger bar.
+function MonsterBrain.interrupt(brain: Brain, now: number, seconds: number)
+	if brain.state == "dead" then
+		return
+	end
+	if brain.state == "stagger" then
+		brain.stateEndsAt = math.max(brain.stateEndsAt, now + seconds)
+		return
+	end
+	brain.state = "recover"
+	brain.attack = nil
+	brain.stateEndsAt = now + seconds
+end
+
 -- Records damage taken. Damage during recovery fills the stagger bar; a full bar staggers the
 -- monster. Returns true when a stagger starts.
 function MonsterBrain.onDamaged(

@@ -33,6 +33,10 @@ local CharacterService = {
 	speedScale = function(_player: Player): number
 		return 1
 	end,
+	-- Movement multiplier from status effects (AbilityService: slows, and 0 while stunned).
+	statusScale = function(_player: Player): number
+		return 1
+	end,
 	-- Whether a player may spawn yet (DataService: only once their profile has loaded).
 	canSpawn = function(_player: Player): boolean
 		return true
@@ -67,8 +71,12 @@ function CharacterService.applyMovement(player: Player)
 		humanoid.WalkSpeed = 0
 		humanoid.JumpHeight = 0
 	else
-		humanoid.WalkSpeed = MapLayout.walkSpeed * (speedMultipliers[player] or 1) * CharacterService.speedScale(player)
-		humanoid.JumpHeight = StarterPlayer.CharacterJumpHeight
+		local status = CharacterService.statusScale(player)
+		humanoid.WalkSpeed = MapLayout.walkSpeed
+			* (speedMultipliers[player] or 1)
+			* CharacterService.speedScale(player)
+			* status
+		humanoid.JumpHeight = if status > 0 then StarterPlayer.CharacterJumpHeight else 0
 	end
 end
 

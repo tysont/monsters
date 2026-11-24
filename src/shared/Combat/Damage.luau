@@ -2,6 +2,11 @@
 -- The one damage pipeline. Every hit in the game (player melee, monster attacks, later abilities)
 -- goes through `Damage.apply`. Pure: the caller supplies the time and applies the result to the
 -- world (Humanoid health, NPC rows, effects). Unit tested under Lune.
+--
+-- Status effects (Shared.Combat.Status) take part: vulnerable multiplies damage taken and shields
+-- absorb it before health. Heals record the healer as a supporter of the target, for assists.
+
+local Status = require("./Status")
 
 export type Combatant = {
 	-- Players use their UserId; NPCs use negative IDs.
@@ -20,6 +25,10 @@ export type Combatant = {
 	lastDamagedAt: number,
 	-- Last time each source damaged this combatant (for assists).
 	contributors: { [number]: number },
+	-- Last time each other combatant healed or shielded this one (support assists).
+	supporters: { [number]: number },
+	-- Status effects, created on first use.
+	statuses: Status.Set?,
 }
 
 export type Hit = {
@@ -41,6 +50,8 @@ export type Result = {
 	killed: boolean,
 	-- Other combatants who damaged the target within the assist window (on a kill).
 	assists: { number },
+	-- Damage absorbed by shields, by the shield's source.
+	absorbed: { [number]: number }?,
 }
 
 local Damage = {}
@@ -57,6 +68,8 @@ function Damage.newCombatant(id: number, team: number?, maxHealth: number, defen
 		protected = false,
 		lastDamagedAt = -math.huge,
 		contributors = {},
+		supporters = {},
+		statuses = nil,
 	}
 end
 
@@ -97,10 +110,20 @@ function Damage.apply(target: Combatant, hit: Hit, assistWindow: number): Result
 		return miss("dodged")
 	end
 
-	local amount = math.min(target.health, Damage.finalAmount(hit.amount, target.defence, hit.modifiers))
+	local final = Damage.finalAmount(hit.amount, target.defence, hit.modifiers)
+	local statuses = target.statuses
+	if statuses then
+		final = math.floor(final * Status.damageTakenMultiplier(statuses, hit.now) + 0.5)
+	end
+	local toHealth, absorbedBy = Status.absorb(statuses, final, hit.now)
+	local amount = math.min(target.health, toHealth)
 	target.health -= amount
 	target.lastDamagedAt = hit.now
 	target.contributors[hit.sourceId] = hit.now
+	for id in absorbedBy do
+		-- A shield that took the hit counts as support.
+		target.supporters[id] = hit.now
+	end
 
 	local killed = target.health <= 0
 	local assists: { number } = {}
@@ -114,17 +137,39 @@ function Damage.apply(target: Combatant, hit: Hit, assistWindow: number): Result
 		end
 		table.sort(assists)
 	end
-	return { applied = true, amount = amount, killed = killed, assists = assists }
+	return {
+		applied = true,
+		amount = amount,
+		killed = killed,
+		assists = assists,
+		absorbed = if next(absorbedBy) then absorbedBy else nil,
+	}
 end
 
--- Heals up to max health. Returns the amount healed.
-function Damage.heal(target: Combatant, amount: number): number
+-- Heals up to max health. Returns the amount healed. A heal from another combatant (`sourceId`,
+-- at `now`) records it as a supporter of the target.
+function Damage.heal(target: Combatant, amount: number, sourceId: number?, now: number?): number
 	if not target.alive or amount <= 0 then
 		return 0
 	end
 	local healed = math.min(amount, target.maxHealth - target.health)
 	target.health += healed
+	if healed > 0 and sourceId and now and sourceId ~= target.id then
+		target.supporters[sourceId] = now
+	end
 	return healed
+end
+
+-- Supporters of `combatant` (healers and shielders) within `window` seconds of `now`.
+function Damage.supportersOf(combatant: Combatant, now: number, window: number): { number }
+	local out: { number } = {}
+	for id, at in combatant.supporters do
+		if now - at <= window then
+			table.insert(out, id)
+		end
+	end
+	table.sort(out)
+	return out
 end
 
 return Damage

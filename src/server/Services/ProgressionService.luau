@@ -2,7 +2,7 @@
 -- Levels, XP and pets on top of player profiles (rules in Shared.Progression).
 --
 --   XP sources (all to the active class, with catch-up): minion proximity credit, camp monsters
---   (shared by whoever damaged them), camp clears, structures (the attacking team nearby), player
+--   (in full to whoever damaged them), camp clears, structures (the attacking team nearby), player
 --   kills and assists, egg deposits, raids and hatches, round win or loss, and damage dealt by
 --   monsters you unleashed.
 --   Level-ups update stats at once (max health and damage), the nameplate attributes, and team
@@ -17,6 +17,7 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Classes = require(ReplicatedStorage.Shared.Classes)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Net = require(ReplicatedStorage.Shared.Net)
 local Profile = require(ReplicatedStorage.Shared.Profile)
@@ -51,6 +52,10 @@ local ProgressionService = {
 	leveledUp = Signal.new() :: Signal.Signal<Player, number>,
 	-- (player) when the active pet or its power changes.
 	petChanged = Signal.new() :: Signal.Signal<Player>,
+	-- Multiplies in-round XP (BalanceService: the weaker team earns a little more).
+	rewardScale = function(_player: Player): number
+		return 1
+	end,
 }
 
 -- Fractional XP carried between small awards (unleash damage), per player.
@@ -67,6 +72,11 @@ local function activeProgress(data: Profile.Data): Profile.ClassData
 		data.classes[data.activeClass] = progress
 	end
 	return progress
+end
+
+local function classOf(data: Profile.Data): Classes.Class
+	local defs = Config.get().classDefinitions
+	return defs[data.activeClass] or defs[Config.get().classes.default]
 end
 
 local function activePetXp(data: Profile.Data): number?
@@ -91,14 +101,21 @@ local function applyStats(player: Player)
 	end
 	local level = activeProgress(data).level
 	local petMultiplier = Progression.petMultiplier(activePetXp(data) or 0, config())
-	local stats = Stats.compute(Config.get().combat.knight, level, if data.activePet ~= 0 then petMultiplier else 1)
+	local class = classOf(data)
+	local stats = Stats.compute(class.stats, level, if data.activePet ~= 0 then petMultiplier else 1)
+	local character = player.Character
+	if character and (entry.classId ~= class.id or entry.level ~= level) then
+		CombatService.dressWeapon(character, class.id, level)
+	end
+	entry.classId = class.id
+	entry.level = level
 	local c = entry.combatant
+	c.defence = stats.defence
 	local fraction = if c.maxHealth > 0 then c.health / c.maxHealth else 1
 	c.maxHealth = stats.maxHealth
 	c.health = math.max(1, math.floor(stats.maxHealth * fraction + 0.5))
 	entry.damage = stats.damage
 	entry.power = stats.power
-	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.Health > 0 then
 		humanoid.MaxHealth = c.maxHealth
@@ -138,6 +155,11 @@ local function publish(player: Player)
 	player:SetAttribute("PetSlots", Progression.petSlots(account, config()))
 	player:SetAttribute("Power", math.floor(ProgressionService.power(player) * 1000 + 0.5) / 1000)
 	player:SetAttribute("Pets", petsJson(data))
+	local levels: { [string]: number } = {}
+	for id, classProgress in data.classes do
+		levels[id] = classProgress.level
+	end
+	player:SetAttribute("ClassLevels", HttpService:JSONEncode(levels))
 end
 
 local function refreshPower(player: Player)
@@ -147,12 +169,15 @@ local function refreshPower(player: Player)
 end
 
 -- Awards XP to a player's active class. Returns the XP actually gained.
-function ProgressionService.award(player: Player, amount: number, _reason: string): number
+function ProgressionService.award(player: Player, amount: number, reason: string): number
 	local data = DataService.get(player)
 	if data == nil or amount <= 0 then
 		return 0
 	end
 	local progress = activeProgress(data)
+	if reason ~= "round" then
+		amount *= ProgressionService.rewardScale(player)
+	end
 	local result = Progression.award(progress, Progression.highestLevel(data.classes), amount, config())
 	if result.levelsGained > 0 then
 		ProgressionService.leveledUp:fire(player, progress.level)
@@ -164,15 +189,79 @@ function ProgressionService.award(player: Player, amount: number, _reason: strin
 	return result.gained
 end
 
-local function awardNear(position: Vector3, team: number?, range: number, amount: number, reason: string)
-	for _, player in Players:GetPlayers() do
-		local entry = CombatService.entry(player.UserId)
-		local p = entry and entry.position()
-		if entry and p and (team == nil or entry.combatant.team == team) and (p - position).Magnitude <= range then
+-- Dev balance runs: class bots whose XP is tallied as if they were players (no catch-up, no
+-- level-ups), by combatant ID.
+export type Ledger = { total: number, byReason: { [string]: number } }
+local ledger: { [number]: Ledger } = {}
+
+function ProgressionService.trackBot(id: number)
+	ledger[id] = { total = 0, byReason = {} }
+end
+
+function ProgressionService.untrackBot(id: number): Ledger?
+	local l = ledger[id]
+	ledger[id] = nil
+	return l
+end
+
+function ProgressionService.ledger(id: number): Ledger?
+	return ledger[id]
+end
+
+-- Awards XP to a combatant: a player, or a tracked bot.
+local function awardId(id: number, amount: number, reason: string)
+	if amount <= 0 then
+		return
+	end
+	if id > 0 then
+		local player = Players:GetPlayerByUserId(id)
+		if player then
 			ProgressionService.award(player, amount, reason)
 		end
+		return
+	end
+	local l = ledger[id]
+	if l then
+		l.total += amount
+		l.byReason[reason] = (l.byReason[reason] or 0) + amount
 	end
 end
+
+-- Players (and tracked bots) on `team` (nil = any) within `range` of a point.
+local function earnersNear(position: Vector3, team: number?, range: number, hostileTo: number?): { number }
+	local out: { number } = {}
+	local function consider(id: number)
+		local entry = CombatService.entry(id)
+		local p = entry and entry.position()
+		if entry == nil or p == nil or (p - position).Magnitude > range then
+			return
+		end
+		local t = entry.combatant.team
+		if team ~= nil and t ~= team then
+			return
+		end
+		if hostileTo ~= nil and t == hostileTo then
+			return
+		end
+		table.insert(out, id)
+	end
+	for _, player in Players:GetPlayers() do
+		consider(player.UserId)
+	end
+	for id in ledger do
+		consider(id)
+	end
+	return out
+end
+
+local function awardNear(position: Vector3, team: number?, range: number, amount: number, reason: string)
+	for _, id in earnersNear(position, team, range, nil) do
+		awardId(id, amount, reason)
+	end
+end
+
+-- XP to players (and tracked bots) on `team` (nil = any) near a point.
+ProgressionService.awardNear = awardNear
 
 -- Pets ---------------------------------------------------------------------------------------
 
@@ -247,6 +336,10 @@ function ProgressionService.init(_self: typeof(ProgressionService))
 		local data = DataService.get(player)
 		return if data then activeProgress(data).level else 1
 	end
+	CombatService.classOf = function(player: Player): string
+		local data = DataService.get(player)
+		return if data then classOf(data).id else Config.get().classes.default
+	end
 	TeamService.powerOf = function(id: string): number
 		local userId = tonumber(string.match(id, "^player:(%d+)$"))
 		local player = if userId then Players:GetPlayerByUserId(userId) else nil
@@ -270,24 +363,37 @@ function ProgressionService.init(_self: typeof(ProgressionService))
 		end
 	end)
 
-	-- Player kills and assists.
+	-- Minions near tracked bots (players get proximity credit through `credited`).
+	CombatService.creditedNear:connect(function(position: Vector3, team: number?, radius: number)
+		for _, id in earnersNear(position, nil, radius, team) do
+			if id < 0 then
+				awardId(id, xp.minion, "minion")
+			end
+		end
+	end)
+
+	-- Heals, heals over time and shields that absorbed damage, on someone else.
+	CombatService.supported:connect(function(sourceId: number, targetId: number, amount: number)
+		if sourceId ~= targetId then
+			awardId(sourceId, amount * xp.healPerHealth, "support")
+		end
+	end)
+
+	-- Player kills and assists (assists include healers and shielders of the killer).
 	CombatService.killed:connect(function(victimId: number, killerId: number, assists: { number })
-		if victimId <= 0 then
+		if victimId <= 0 and ledger[victimId] == nil then
 			return
 		end
+		awardId(killerId, xp.kill, "kill")
 		local killer = Players:GetPlayerByUserId(killerId)
 		if killer then
-			ProgressionService.award(killer, xp.kill, "kill")
 			local data = DataService.get(killer)
 			if data then
 				data.stats.kills += 1
 			end
 		end
 		for _, id in assists do
-			local assister = Players:GetPlayerByUserId(id)
-			if assister then
-				ProgressionService.award(assister, xp.assist, "assist")
-			end
+			awardId(id, xp.assist, "assist")
 		end
 		local victim = Players:GetPlayerByUserId(victimId)
 		local victimData = victim and DataService.get(victim)
@@ -296,22 +402,22 @@ function ProgressionService.init(_self: typeof(ProgressionService))
 		end
 	end)
 
-	-- Camp monsters: shared by everyone who damaged them.
+	-- Camp monsters: the full amount to everyone who damaged them (not split).
 	MonsterService.died:connect(function(m: MonsterService.Monster)
 		if m.camp == nil then
 			return
 		end
-		local players: { Player } = {}
+		local earners: { number } = {}
 		for id in m.row.entry.combatant.contributors do
-			local player = Players:GetPlayerByUserId(id)
-			if player then
-				table.insert(players, player)
+			if (id > 0 and Players:GetPlayerByUserId(id)) or ledger[id] then
+				table.insert(earners, id)
 			end
 		end
-		if #players > 0 then
-			local share = m.row.entry.combatant.maxHealth * xp.monsterPerHealth / #players
-			for _, player in players do
-				ProgressionService.award(player, share, "monster")
+		if #earners > 0 then
+			-- Unsplit: everyone who damaged it gets the full amount.
+			local share = m.row.entry.combatant.maxHealth * xp.monsterPerHealth
+			for _, id in earners do
+				awardId(id, share, "monster")
 			end
 		end
 	end)
@@ -366,7 +472,7 @@ function ProgressionService.init(_self: typeof(ProgressionService))
 		end
 	end)
 
-	-- Round completion.
+	-- Round completion (the XP payout is BalanceService's).
 	RoundService.phaseChanged:connect(function(state: Round.State)
 		if state.phase ~= "Ending" then
 			return
@@ -380,7 +486,6 @@ function ProgressionService.init(_self: typeof(ProgressionService))
 				if won then
 					data.stats.wins += 1
 				end
-				ProgressionService.award(player, if won then xp.roundWin else xp.roundLoss, "round")
 			end
 		end
 	end)

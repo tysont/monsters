@@ -23,6 +23,8 @@ export type Data = {
 	version: number,
 	classes: { [string]: ClassData },
 	activeClass: string,
+	-- Whether the player has picked a class yet (the first-join picker shows until they do).
+	classChosen: boolean,
 	pets: { Pet },
 	-- Pet ID, or 0 for none.
 	activePet: number,
@@ -50,6 +52,7 @@ function Profile.new(): Data
 		version = VERSION,
 		classes = { knight = { level = 1, xp = 0 } },
 		activeClass = "knight",
+		classChosen = false,
 		pets = {},
 		activePet = 0,
 		nextPetId = 1,

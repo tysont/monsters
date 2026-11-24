@@ -196,6 +196,12 @@ function CampService.resetAll()
 end
 
 -- Dev: a camp's state for reports.
+-- The monster type of camp `index`.
+function CampService.monsterOf(index: number): string?
+	local state = states[index]
+	return if state then state.camp.monster else nil
+end
+
 function CampService.describe(index: number): string?
 	local state = states[index]
 	if state == nil then

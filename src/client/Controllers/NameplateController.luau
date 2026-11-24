@@ -92,6 +92,13 @@ local function attach(player: Player, character: Model)
 		plate.name.Text = `{player.DisplayName}  ·  Lv {if type(level) == "number" then level else 1}`
 			.. `  ·  Acct {if type(account) == "number" then account else 1}`
 			.. (if type(title) == "string" then `  ·  {title}` else "")
+		local bounty = player:GetAttribute("Bounty")
+		if type(bounty) == "number" then
+			plate.name.Text ..= `  ·  BOUNTY {bounty}`
+		end
+		if player:GetAttribute("Idle") then
+			plate.name.Text ..= "  ·  idle"
+		end
 		plate.name.TextColor3 = teamColor(player)
 		local fraction = if humanoid.MaxHealth > 0 then math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1) else 0
 		plate.fill.Size = UDim2.fromScale(fraction, 1)
@@ -102,6 +109,8 @@ local function attach(player: Player, character: Model)
 	table.insert(plate.connections, player:GetAttributeChangedSignal("ClassLevel"):Connect(refresh))
 	table.insert(plate.connections, player:GetAttributeChangedSignal("AccountLevel"):Connect(refresh))
 	table.insert(plate.connections, player:GetAttributeChangedSignal("Title"):Connect(refresh))
+	table.insert(plate.connections, player:GetAttributeChangedSignal("Bounty"):Connect(refresh))
+	table.insert(plate.connections, player:GetAttributeChangedSignal("Idle"):Connect(refresh))
 	refresh()
 
 	-- Parented to our PlayerGui (not the character) so the plate survives respawns.

@@ -1,0 +1,86 @@
+--!strict
+-- Warden: the neutral jungle boss (Phase 11), a planned swing moment. It appears in the jungle on
+-- a timer during the round; the team that kills it gets stronger minion waves for a while. A
+-- group fight: big slams, a sweeping tail, a charge, and from half health it calls splitlings.
+
+local Types = require("./Types")
+
+local definition: Types.Definition = {
+	name = "Warden",
+	maxHealth = 6000,
+	radius = 6,
+	height = 14,
+	speed = 8,
+	aggroRange = 34,
+	leashRange = 50,
+	defence = 10,
+	wakeRange = 40,
+	attacks = {
+		{
+			id = "slam",
+			primitive = "slam",
+			origin = "target",
+			minRange = 0,
+			maxRange = 22,
+			damage = 45,
+			telegraphSeconds = 1.2,
+			recoverSeconds = 1.3,
+			cooldown = 3,
+			radius = 8,
+			knockback = 40,
+			heavy = true,
+			weight = 3,
+		},
+		{
+			id = "tail",
+			primitive = "sweep",
+			minRange = 0,
+			maxRange = 10,
+			damage = 35,
+			telegraphSeconds = 0.9,
+			recoverSeconds = 1,
+			cooldown = 2.5,
+			reach = 18,
+			arc = 160,
+			knockback = 35,
+			heavy = true,
+			weight = 3,
+		},
+		{
+			id = "charge",
+			primitive = "charge",
+			minRange = 8,
+			maxRange = 30,
+			damage = 40,
+			telegraphSeconds = 1.1,
+			recoverSeconds = 2,
+			cooldown = 7,
+			reach = 32,
+			speed = 45,
+			knockback = 45,
+			heavy = true,
+			weight = 2,
+		},
+		{
+			id = "call",
+			primitive = "summon",
+			minRange = 0,
+			maxRange = 30,
+			damage = 0,
+			telegraphSeconds = 1.3,
+			recoverSeconds = 1.2,
+			cooldown = 14,
+			radius = 6,
+			summon = { id = "splitling", count = 3, max = 6 },
+			knockback = 0,
+			minPhase = 2,
+			weight = 2,
+		},
+	},
+	stagger = { threshold = 260, seconds = 3, bonus = 1.5, decayPerSecond = 25 },
+	phases = { 0.5 },
+	phaseTempo = 0.85,
+	look = { shape = "blocky", color = { 90, 60, 140 } },
+}
+
+return definition

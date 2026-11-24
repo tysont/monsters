@@ -25,12 +25,14 @@ local Net = require(ReplicatedStorage.Shared.Net)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Round = require(ReplicatedStorage.Shared.Round)
 
+local AbilityController = require("./AbilityController")
 local CombatController = require("./CombatController")
 local EggController = require("./EggController")
 local NpcRenderController = require("./NpcRenderController")
 local StructureController = require("./StructureController")
 local Feedback = require("../Feedback")
 local Gallery = require("../UI/Screens/Gallery")
+local ClassPicker = require("../UI/Screens/ClassPicker")
 local HatchDialog = require("../UI/Screens/HatchDialog")
 local PetsScreen = require("../UI/Screens/PetsScreen")
 local Hud = require("../UI/Screens/Hud")
@@ -49,7 +51,13 @@ local CARRIER_SIGHT = 150
 
 local UiController = {
 	name = "UiController",
-	dependencies = { "CombatController", "EggController", "NpcRenderController", "StructureController" },
+	dependencies = {
+		"AbilityController",
+		"CombatController",
+		"EggController",
+		"NpcRenderController",
+		"StructureController",
+	},
 	-- Average milliseconds per frame spent updating HUD state (shown in the debug overlay).
 	averageCostMs = 0,
 }
@@ -83,6 +91,11 @@ local state: Hud.HudState = {
 	alerts = scope:Value({ false, false }),
 	boss = scope:Value(nil :: Hud.BossInfo?),
 	carrying = scope:Value(""),
+	className = scope:Value("Knight"),
+	attackName = scope:Value("Attack"),
+	abilitySlots = scope:Value({} :: { Hud.AbilitySlot }),
+	abilityCooldowns = { scope:Value(0), scope:Value(0), scope:Value(0) },
+	statuses = scope:Value({} :: { string }),
 }
 
 local settingsOpen = scope:Value(false)
@@ -93,6 +106,10 @@ local hatchSecondsLeft = scope:Value(0)
 local petsOpen = scope:Value(false)
 local pets = scope:Value({} :: { PetsScreen.PetInfo })
 local petSlots = scope:Value(1)
+local classOpen = scope:Value(false)
+local classLevels = scope:Value({} :: { [string]: number })
+local activeClass = scope:Value("knight")
+local firstPick = scope:Value(false)
 local levelUpText = state.levelUp
 
 local function teamByIndex(index: number): Team?
@@ -189,8 +206,13 @@ local function updatePlayer(now: number)
 	hatchSecondsLeft:set(if pending then math.max(0, math.ceil(pending.expiresAt - now)) else 0)
 	local team = player.Team
 	state.myTeam:set(if team then attribute(team, "TeamIndex", 0) else 0)
-	state.attackCooldown:set(CombatController.cooldown("attack"))
+	state.attackCooldown:set(
+		if AbilityController.meleeBasic() then CombatController.cooldown("attack") else AbilityController.cooldown(0)
+	)
 	state.dodgeCooldown:set(CombatController.cooldown("dodge"))
+	for slot, value in state.abilityCooldowns do
+		value:set(AbilityController.cooldown(slot))
+	end
 end
 
 local function updateDots()
@@ -391,6 +413,93 @@ local function onKill(event: Remotes.KillEvent)
 	end
 end
 
+-- Classes ----------------------------------------------------------------------------------
+
+local function chooseClass(classId: string)
+	Net.fireServer(Remotes.ChooseClass, classId)
+	classOpen:set(false)
+	if classId ~= Fusion.peek(activeClass) then
+		local def = Config.get().classDefinitions[classId]
+		local dead = Fusion.peek(state.dead)
+		Toast.show(if dead then `You will respawn as a {def.name}.` else `You are now a {def.name}.`, "success")
+	end
+end
+
+-- Class name, basic attack, ability slots and statuses from the player's attributes.
+local function readClass()
+	local id = player:GetAttribute("ActiveClass")
+	local classId = if type(id) == "string" then id else Config.get().classes.default
+	activeClass:set(classId)
+	local class = AbilityController.class()
+	state.className:set(class.name)
+	state.attackName:set(class.basic.name)
+	local slots: { Hud.AbilitySlot } = {}
+	for _, s in AbilityController.slots() do
+		table.insert(slots, {
+			name = s.name,
+			glyph = s.glyph,
+			key = s.key,
+			unlocked = s.unlocked,
+			unlockLevel = s.unlockLevel,
+		})
+	end
+	state.abilitySlots:set(slots)
+	local raw = player:GetAttribute("ClassLevels")
+	if type(raw) == "string" then
+		local ok, levels = pcall(HttpService.JSONDecode, HttpService, raw)
+		if ok and type(levels) == "table" then
+			classLevels:set(levels :: any)
+		end
+	end
+end
+
+local function readStatuses()
+	local raw = player:GetAttribute("Statuses")
+	local list: { string } = {}
+	if type(raw) == "string" then
+		for kind in string.gmatch(raw, "[^,]+") do
+			table.insert(list, kind)
+		end
+	end
+	state.statuses:set(list)
+end
+
+-- Class stations: the prompt shows only at your own team's station and opens the picker.
+local function watchStations()
+	local folder = workspace:WaitForChild("ClassStations", 30)
+	if folder == nil then
+		return
+	end
+	local function hook(station: Instance)
+		local prompt = station:FindFirstChild("ChangeClass", true)
+		if prompt and prompt:IsA("ProximityPrompt") then
+			prompt.Triggered:Connect(function()
+				classOpen:set(true)
+			end)
+		end
+	end
+	for _, station in folder:GetChildren() do
+		hook(station)
+	end
+	folder.ChildAdded:Connect(hook)
+	task.spawn(function()
+		while true do
+			local team = player.Team
+			local index = team and team:GetAttribute("TeamIndex")
+			for _, station in folder:GetChildren() do
+				local prompt = station:FindFirstChild("ChangeClass", true)
+				if prompt and prompt:IsA("ProximityPrompt") then
+					local own = station:GetAttribute("Team") == index
+					if prompt.Enabled ~= own then
+						prompt.Enabled = own
+					end
+				end
+			end
+			task.wait(0.5)
+		end
+	end)
+end
+
 function UiController.start(_self: typeof(UiController))
 	pcall(function()
 		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
@@ -406,6 +515,12 @@ function UiController.start(_self: typeof(UiController))
 		Hud(scope, state, {
 			attack = CombatController.attack,
 			dodge = CombatController.dodge,
+			cast = function(slot: number)
+				AbilityController.cast(slot)
+			end,
+			openClasses = function()
+				classOpen:set(true)
+			end,
 			openPets = function()
 				petsOpen:set(true)
 			end,
@@ -416,6 +531,13 @@ function UiController.start(_self: typeof(UiController))
 	)
 	local overlay = Layout.screen(scope, "Menus", 50, playerGui, {
 		SettingsScreen(scope, settingsOpen),
+		ClassPicker(scope, {
+			open = classOpen,
+			current = activeClass,
+			levels = classLevels,
+			firstPick = firstPick,
+			choose = chooseClass,
+		}),
 		RoundSummary(scope, summaryOpen, summary),
 		PetsScreen(scope, {
 			open = petsOpen,
@@ -434,6 +556,15 @@ function UiController.start(_self: typeof(UiController))
 			choose = EggController.choose,
 		}),
 	})
+	-- Server announcements: bounties, the jungle boss, team moves, round XP.
+	Net.onClientEvent(Remotes.Announce, function(event: Remotes.AnnounceEvent)
+		local kind = if event.kind == "success"
+				or event.kind == "warning"
+				or event.kind == "danger"
+			then event.kind
+			else "info"
+		Toast.show(event.text, kind :: any)
+	end)
 	Net.onClientEvent(Remotes.RoundSummary, function(s: Remotes.RoundSummary)
 		summary:set(s)
 		summaryOpen:set(true)
@@ -452,6 +583,30 @@ function UiController.start(_self: typeof(UiController))
 			end
 		end)
 	end
+
+	-- Classes: the HUD follows the active class and level; the picker opens on first join.
+	for _, name in { "ActiveClass", "ClassLevel", "ClassLevels" } do
+		player:GetAttributeChangedSignal(name):Connect(readClass)
+	end
+	readClass()
+	player:GetAttributeChangedSignal("Statuses"):Connect(readStatuses)
+	readStatuses()
+	local function readNeedsClass()
+		local needs = player:GetAttribute("NeedsClass") == true
+		firstPick:set(needs)
+		if needs then
+			classOpen:set(true)
+		end
+	end
+	player:GetAttributeChangedSignal("NeedsClass"):Connect(readNeedsClass)
+	readNeedsClass()
+	-- Closing the first-join picker keeps the default class.
+	scope:Observer(classOpen):onChange(function()
+		if not Fusion.peek(classOpen) and Fusion.peek(firstPick) then
+			Net.fireServer(Remotes.ChooseClass, Fusion.peek(activeClass))
+		end
+	end)
+	task.spawn(watchStations)
 
 	-- Pets: the stable list arrives as JSON in the "Pets" attribute.
 	local function readPets()

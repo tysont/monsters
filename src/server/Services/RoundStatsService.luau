@@ -23,6 +23,8 @@ export type PlayerStats = {
 	structureDamage: number,
 	minions: number,
 	structuresDestroyed: number,
+	-- Healing and shielding done for others.
+	support: number,
 }
 
 local RoundStatsService = {
@@ -44,6 +46,7 @@ local function statsOf(userId: number): PlayerStats
 			structureDamage = 0,
 			minions = 0,
 			structuresDestroyed = 0,
+			support = 0,
 		}
 		stats[userId] = s
 	end
@@ -52,11 +55,26 @@ end
 
 -- Score for the MVP pick.
 local function score(s: PlayerStats): number
-	return s.kills * 3 + s.assists + s.structuresDestroyed * 5 + s.structureDamage / 200 + s.minions * 0.2
+	return s.kills * 3
+		+ s.assists
+		+ s.structuresDestroyed * 5
+		+ s.structureDamage / 200
+		+ s.minions * 0.2
+		+ s.support / 100
 end
 
 function RoundStatsService.stats(player: Player): PlayerStats
 	return statsOf(player.UserId)
+end
+
+-- A player's contribution score this round (MVP and the round payout).
+function RoundStatsService.score(player: Player): number
+	return score(statsOf(player.UserId))
+end
+
+-- Structures destroyed by each team this round.
+function RoundStatsService.structuresDestroyed(): { number }
+	return table.clone(teamStructures)
 end
 
 local function sendSummaries(state: Round.State)
@@ -125,6 +143,11 @@ function RoundStatsService.init(_self: typeof(RoundStatsService))
 			end
 		end
 	)
+	CombatService.supported:connect(function(sourceId: number, targetId: number, amount: number)
+		if sourceId > 0 and sourceId ~= targetId then
+			statsOf(sourceId).support += amount
+		end
+	end)
 	CombatService.credited:connect(function(player: Player, kind: string)
 		if kind == "minion" then
 			statsOf(player.UserId).minions += 1

@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Fusion = require(ReplicatedStorage.Packages.Fusion)
 
 local Badge = require("../Components/Badge")
+local Button = require("../Components/Button")
 local CooldownRing = require("../Components/CooldownRing")
 local IconButton = require("../Components/IconButton")
 local Minimap = require("./Minimap")
@@ -56,6 +57,21 @@ export type HudState = {
 	boss: Fusion.Value<BossInfo?>,
 	-- The egg the player carries ("rare shellback"), or "".
 	carrying: Fusion.Value<string>,
+	-- Class (Phase 10): its name, the basic attack's name, the three ability slots and their
+	-- cooldowns (1 just used, 0 ready), and the status effects on the player.
+	className: Fusion.Value<string>,
+	attackName: Fusion.Value<string>,
+	abilitySlots: Fusion.Value<{ AbilitySlot }>,
+	abilityCooldowns: { Fusion.Value<number> },
+	statuses: Fusion.Value<{ string }>,
+}
+
+export type AbilitySlot = {
+	name: string,
+	glyph: string,
+	key: string,
+	unlocked: boolean,
+	unlockLevel: number,
 }
 
 export type BossInfo = {
@@ -74,6 +90,8 @@ export type Actions = {
 	dodge: () -> (),
 	openSettings: () -> (),
 	openPets: () -> (),
+	openClasses: () -> (),
+	cast: (slot: number) -> (),
 }
 
 local TEAM_COLORS = { Theme.color.team1, Theme.color.team2 }
@@ -323,14 +341,15 @@ end
 
 local function ability(
 	scope: UiState.Scope,
-	name: string,
+	name: Fusion.UsedAs<string>,
 	key: string,
 	cooldown: Fusion.Value<number>,
 	onClick: () -> (),
-	order: number
+	order: number,
+	tooltip: Fusion.UsedAs<string>?
 ): TextButton
 	local button = scope:New("TextButton")({
-		Name = name,
+		Name = `Action{order}`,
 		Size = UDim2.fromOffset(ABILITY_SIZE, ABILITY_SIZE),
 		LayoutOrder = order,
 		AutoButtonColor = false,
@@ -361,8 +380,90 @@ local function ability(
 			}),
 		},
 	}) :: TextButton
-	Tooltip(scope, button, `{name} ({key})`)
+	Tooltip(scope, button, tooltip or scope:Computed(function(use)
+		return `{use(name)} ({key})`
+	end))
 	return button
+end
+
+-- One class ability slot: its glyph, key and cooldown ring; locked slots show the level that
+-- unlocks them.
+local function classAbility(scope: UiState.Scope, state: HudState, actions: Actions, slot: number): TextButton
+	local info = scope:Computed(function(use): AbilitySlot?
+		return use(state.abilitySlots)[slot]
+	end)
+	local button = ability(
+		scope,
+		scope:Computed(function(use)
+			local s: AbilitySlot? = use(info)
+			if s == nil then
+				return ""
+			end
+			return if s.unlocked then s.glyph else `Lv {s.unlockLevel}`
+		end),
+		tostring(slot),
+		state.abilityCooldowns[slot],
+		function()
+			actions.cast(slot)
+		end,
+		slot + 1,
+		scope:Computed(function(use)
+			local s: AbilitySlot? = use(info)
+			if s == nil then
+				return ""
+			end
+			return if s.unlocked then `{s.name} ({s.key})` else `{s.name}: unlocks at class level {s.unlockLevel}`
+		end)
+	)
+	button.Name = `Ability{slot}`
+	return button
+end
+
+local STATUS_STYLE: { [string]: { text: string, color: Color3 } } = {
+	slow = { text = "Slowed", color = Theme.color.info },
+	stun = { text = "Stunned", color = Theme.color.warning },
+	shield = { text = "Shield", color = Theme.color.accent },
+	regen = { text = "Healing", color = Theme.color.success },
+	taunt = { text = "Taunted", color = Theme.color.danger },
+	vulnerable = { text = "Marked", color = Theme.color.danger },
+	empower = { text = "Empowered", color = Theme.color.warning },
+}
+
+-- Status effects on the player, as small labels above the health bar.
+local function statusRow(scope: UiState.Scope, state: HudState): Frame
+	local children: { Fusion.Child } = {
+		scope:New("UIListLayout")({
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			Padding = UDim.new(0, Theme.space.xs),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	}
+	-- A fixed label per kind (pooled), shown while it applies.
+	local order = 0
+	for kind, style in STATUS_STYLE do
+		order += 1
+		table.insert(
+			children,
+			Badge(scope, {
+				name = kind,
+				text = style.text,
+				color = style.color,
+				layoutOrder = order,
+				visible = scope:Computed(function(use)
+					return table.find(use(state.statuses), kind) ~= nil
+				end),
+			})
+		)
+	end
+	return scope:New("Frame")({
+		Name = "Statuses",
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -64 - ABILITY_SIZE - 20),
+		Size = UDim2.fromOffset(420, 22),
+		BackgroundTransparency = 1,
+		[Children] = children,
+	}) :: Frame
 end
 
 local function killFeed(scope: UiState.Scope, state: HudState): Frame
@@ -401,7 +502,7 @@ local function killFeed(scope: UiState.Scope, state: HudState): Frame
 	}) :: Frame
 end
 
-local function respawnScreen(scope: UiState.Scope, state: HudState): Frame
+local function respawnScreen(scope: UiState.Scope, state: HudState, actions: Actions): Frame
 	local alpha = Motion.spring(
 		scope,
 		scope:Computed(function(use)
@@ -450,6 +551,25 @@ local function respawnScreen(scope: UiState.Scope, state: HudState): Frame
 					return 1 - use(alpha)
 				end),
 			}),
+			-- Switching class is allowed while respawning.
+			scope:New("Frame")({
+				Name = "ChangeClass",
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromScale(0.5, 0.57),
+				Size = UDim2.fromOffset(220, 48),
+				BackgroundTransparency = 1,
+				Visible = state.dead,
+				[Children] = {
+					Button(scope, {
+						text = scope:Computed(function(use)
+							return `Change class ({use(state.className)})`
+						end),
+						variant = "secondary",
+						size = UDim2.fromScale(1, 1),
+						onClick = actions.openClasses,
+					}),
+				},
+			}) :: any,
 		},
 	}) :: Frame
 end
@@ -572,7 +692,7 @@ local function Hud(scope: UiState.Scope, state: HudState, actions: Actions): { F
 			Name = "Abilities",
 			AnchorPoint = Vector2.new(0.5, 1),
 			Position = UDim2.new(0.5, 0, 1, -64),
-			Size = UDim2.fromOffset(300, ABILITY_SIZE + 12),
+			Size = UDim2.fromOffset(520, ABILITY_SIZE + 12),
 			BackgroundTransparency = 1,
 			[Children] = {
 				scope:New("UIListLayout")({
@@ -581,8 +701,11 @@ local function Hud(scope: UiState.Scope, state: HudState, actions: Actions): { F
 					Padding = UDim.new(0, Theme.space.lg),
 					SortOrder = Enum.SortOrder.LayoutOrder,
 				}),
-				ability(scope, "Attack", "LMB", state.attackCooldown, actions.attack, 1),
-				ability(scope, "Dodge", "Q", state.dodgeCooldown, actions.dodge, 2),
+				ability(scope, state.attackName, "LMB", state.attackCooldown, actions.attack, 1),
+				classAbility(scope, state, actions, 1),
+				classAbility(scope, state, actions, 2),
+				classAbility(scope, state, actions, 3),
+				ability(scope, "Dodge", "Q", state.dodgeCooldown, actions.dodge, 5),
 			},
 		}),
 		scope:New("Frame")({
@@ -625,7 +748,7 @@ local function Hud(scope: UiState.Scope, state: HudState, actions: Actions): { F
 			end),
 			color = Theme.color.info,
 			label = scope:Computed(function(use)
-				return `{use(state.xp)} / {use(state.xpNext)} XP`
+				return `{use(state.className)}  ·  {use(state.xp)} / {use(state.xpNext)} XP`
 			end),
 			anchorPoint = Vector2.new(0.5, 1),
 			position = UDim2.new(0.5, 32, 1, -4),
@@ -664,7 +787,8 @@ local function Hud(scope: UiState.Scope, state: HudState, actions: Actions): { F
 			position = UDim2.new(0, Theme.space.lg + 56, 1, -Theme.space.lg),
 		}),
 
-		respawnScreen(scope, state),
+		statusRow(scope, state),
+		respawnScreen(scope, state, actions),
 	}
 end
 

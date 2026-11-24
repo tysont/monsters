@@ -95,6 +95,17 @@ function RoundService.finish(winner: number): boolean
 	return true
 end
 
+-- Dev tool: moves the Active round's clock forward by `seconds` (escalation, siege minions, the
+-- jungle boss and comeback fading all follow it). Returns false outside Active.
+function RoundService.skip(seconds: number): boolean
+	if state.phase ~= "Active" or state.activeSince == nil then
+		return false
+	end
+	state.activeSince = (state.activeSince :: number) - seconds
+	publish()
+	return true
+end
+
 -- Dev tool: speeds up timed phases. Applies from the next phase.
 function RoundService.setTimeScale(scale: number)
 	timeScale = math.clamp(scale, 1, 100)

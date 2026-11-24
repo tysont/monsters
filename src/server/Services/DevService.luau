@@ -27,6 +27,14 @@
 --   /setlevel n  /addxp n  /addpet kind [xp]  /maxprofile   progression test tools
 --   /pets [n]          n pets following bots and players (load test)
 --   /cleartest index [level] [timeout]  a level-N duelist bot clears a camp; reports the time
+--   /class id          switch class anywhere   /statuses [range]  status effects near you
+--   /classclear index [level] [classes] [timeout]  four class bots clear a camp (balance)
+--   /classfight [perTeam] [level] [seconds]  mixed class bots skirmish mid lane; XP by class
+--   /classbots perTeam [level] | clear  class bots fighting across the middle (load)
+--   /balance  /dashboard   balance state (equalisers, escalation); telemetry dashboard
+--   /boss  /idle  /roundskip minutes   spawn the jungle boss; mark yourself idle; age the round
+--   /hurt amount [range]  hit the nearest hostile as yourself (dev damage)
+--   /classduel [classes] [maxClass]  three level-1 class bots against one maxed bot (balance)
 --   /pack [n]          spawn a pack of weak enemies in the gym (default 5)
 --   /botfight [n]      spawn n bots per team fighting in the gym (default 5)
 --   /clearnpcs         remove every NPC
@@ -47,6 +55,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:GetService("TextChatService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local Status = require(ReplicatedStorage.Shared.Combat.Status)
 local DebugAccess = require(ReplicatedStorage.Shared.DebugAccess)
 local Net = require(ReplicatedStorage.Shared.Net)
 local Map = require(ReplicatedStorage.Shared.Map)
@@ -56,8 +65,12 @@ local Tuning = require(ReplicatedStorage.Shared.Combat.Tuning)
 local CharacterService = require("./CharacterService")
 local CombatService = require("./CombatService")
 local GymService = require("./GymService")
+local JungleBossService = require("./JungleBossService")
 local AvoidTestService = require("./AvoidTestService")
+local BalanceService = require("./BalanceService")
 local CampService = require("./CampService")
+local ClassBotService = require("./ClassBotService")
+local ClassService = require("./ClassService")
 local DataService = require("./DataService")
 local EggService = require("./EggService")
 local MinionService = require("./MinionService")
@@ -68,6 +81,7 @@ local ProgressionService = require("./ProgressionService")
 local RoundService = require("./RoundService")
 local ShutdownService = require("./ShutdownService")
 local TeamService = require("./TeamService")
+local TelemetryService = require("./TelemetryService")
 
 local DevService = {
 	name = "DevService",
@@ -87,6 +101,11 @@ local DevService = {
 		"PetService",
 		"ProgressionService",
 		"EggService",
+		"ClassBotService",
+		"ClassService",
+		"BalanceService",
+		"JungleBossService",
+		"TelemetryService",
 	},
 }
 
@@ -605,6 +624,163 @@ local MONSTER_COMMANDS: { Command } = {
 				print(`[Dev] {message}`)
 				reply(player, message)
 			end)
+		end,
+	},
+	{
+		alias = "/class",
+		usage = "/class id",
+		run = function(player: Player, args: { string }): string
+			local reason = ClassService.choose(player, args[1] or "", true)
+			return reason or `You are now a {args[1]}.`
+		end,
+	},
+	{
+		alias = "/statuses",
+		usage = "/statuses [range]",
+		run = function(player: Player, args: { string }): string
+			local me = CombatService.entry(player.UserId)
+			local p = me and me.position()
+			if p == nil then
+				return "No character."
+			end
+			local range = tonumber(args[1]) or 40
+			local t = workspace:GetServerTimeNow()
+			local lines = {}
+			CombatService.allNear(p.X, p.Z, range, function(entry)
+				local s = entry.combatant.statuses
+				local summary = Status.summary(s, t)
+				if summary ~= "" then
+					local c = entry.combatant
+					table.insert(
+						lines,
+						`{entry.kind} {c.id}: {summary} (speed x{string.format(
+							"%.2f",
+							Status.speedMultiplier(s, t, Config.get().classes.status)
+						)}, shield {math.floor(Status.shield(s, t))}, taunter {Status.taunter(s, t) or "-"}) hp {math.floor(
+							c.health
+						)}/{c.maxHealth}`
+					)
+				end
+			end)
+			return if #lines > 0 then table.concat(lines, "\n") else "No status effects nearby."
+		end,
+	},
+	{
+		alias = "/classclear",
+		usage = "/classclear index [level] [classes,comma,separated] [timeout]",
+		run = function(player: Player, args: { string }): string
+			local index = tonumber(args[1]) or 1
+			local level = math.clamp(tonumber(args[2]) or 20, 1, 200)
+			local classes: { string } = {}
+			for id in string.gmatch(args[3] or "knight,hunter,mage,healer", "[^,]+") do
+				table.insert(classes, id)
+			end
+			local timeout = math.clamp(tonumber(args[4]) or 180, 10, 900)
+			return ClassBotService.groupClear(index, level, classes, timeout, function(message)
+				print(`[Dev] {message}`)
+				reply(player, message)
+			end)
+		end,
+	},
+	{
+		alias = "/classfight",
+		usage = "/classfight [perTeam] [level] [seconds]",
+		run = function(player: Player, args: { string }): string
+			local perTeam = math.clamp(math.floor(tonumber(args[1]) or 4), 1, 20)
+			local level = math.clamp(tonumber(args[2]) or 20, 1, 200)
+			local seconds = math.clamp(tonumber(args[3]) or 300, 10, 3600)
+			return ClassBotService.skirmish(perTeam, level, seconds, function(message)
+				print(`[Dev] {message}`)
+				reply(player, message)
+			end)
+		end,
+	},
+	{
+		alias = "/classbots",
+		usage = "/classbots perTeam [level] | clear",
+		run = function(_player: Player, args: { string }): string
+			if args[1] == "clear" then
+				return `Removed {ClassBotService.clear()} class bot(s).`
+			end
+			local perTeam = math.clamp(math.floor(tonumber(args[1]) or 20), 1, 40)
+			return ClassBotService.load(perTeam, math.clamp(tonumber(args[2]) or 20, 1, 200))
+		end,
+	},
+	{
+		alias = "/balance",
+		usage = "/balance",
+		run = function(_player: Player, _args: { string }): string
+			return BalanceService.describe()
+		end,
+	},
+	{
+		alias = "/dashboard",
+		usage = "/dashboard",
+		run = function(_player: Player, _args: { string }): string
+			return table.concat(TelemetryService.dashboard(), "\n")
+		end,
+	},
+	{
+		alias = "/boss",
+		usage = "/boss",
+		run = function(_player: Player, _args: { string }): string
+			local p = JungleBossService.spawn()
+			return if p
+				then `The Warden appeared at ({math.floor(p.X)}, {math.floor(p.Z)}).`
+				else "The Warden is already up."
+		end,
+	},
+	{
+		alias = "/idle",
+		usage = "/idle",
+		run = function(player: Player, _args: { string }): string
+			BalanceService.forceIdle(player)
+			return "You are now idle (move to clear it)."
+		end,
+	},
+	{
+		alias = "/roundskip",
+		usage = "/roundskip minutes",
+		run = function(_player: Player, args: { string }): string
+			local minutes = tonumber(args[1]) or 5
+			if not RoundService.skip(minutes * 60) then
+				return "Only during an Active round."
+			end
+			return `Round clock moved forward {minutes} min.\n{BalanceService.describe()}`
+		end,
+	},
+	{
+		alias = "/classduel",
+		usage = "/classduel [newClasses,comma,separated] [maxClass]",
+		run = function(player: Player, args: { string }): string
+			local classes: { string } = {}
+			for id in string.gmatch(args[1] or "knight,knight,knight", "[^,]+") do
+				table.insert(classes, id)
+			end
+			return ClassBotService.duel(classes, args[2] or "knight", 120, function(message)
+				print(`[Dev] {message}`)
+				reply(player, message)
+			end)
+		end,
+	},
+	{
+		alias = "/hurt",
+		usage = "/hurt amount [range]",
+		run = function(player: Player, args: { string }): string
+			local me = CombatService.entry(player.UserId)
+			if me == nil then
+				return "No character."
+			end
+			local target = CombatService.nearestHostile(me, tonumber(args[2]) or 80)
+			if target == nil then
+				return "Nothing hostile nearby."
+			end
+			local result = CombatService.applyHit(player.UserId, target.combatant.id, tonumber(args[1]) or 100, "dev")
+			local c = target.combatant
+			return `Hit {c.id} for {result and result.amount or 0}: {math.floor(c.health)}/{c.maxHealth}{if result
+					and result.killed
+				then " (killed)"
+				else ""}.`
 		end,
 	},
 	{

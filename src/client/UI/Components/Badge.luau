@@ -17,6 +17,7 @@ export type Props = {
 	anchorPoint: Vector2?,
 	layoutOrder: number?,
 	name: string?,
+	visible: Fusion.UsedAs<boolean>?,
 }
 
 local function Badge(scope: UiState.Scope, props: Props): GuiObject
@@ -27,6 +28,7 @@ local function Badge(scope: UiState.Scope, props: Props): GuiObject
 		Position = props.position,
 		AnchorPoint = props.anchorPoint,
 		LayoutOrder = props.layoutOrder,
+		Visible = props.visible,
 		BackgroundColor3 = props.color or Theme.color.accent,
 		Text = props.text,
 		TextColor3 = Theme.color.textOnAccent,

@@ -244,7 +244,7 @@ end
 function NpcService.spawn(kind: Kind, position: Vector3, team: number?): number
 	local stats: Stats
 	if kind == "bot" or kind == "lanebot" then
-		local s = Stats.compute(Config.get().combat.knight, 1)
+		local s = Stats.compute(Config.get().classDefinitions.knight.stats, 1)
 		stats = {
 			maxHealth = s.maxHealth,
 			damage = s.damage,

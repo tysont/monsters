@@ -109,6 +109,26 @@ export type RaidAlertEvent = {
 }
 
 -- A launch pad flight for the local player to fly (the server picked the landing spot).
+-- A class ability cast (Phase 10). Slot 0 is the basic attack for non-melee classes; 1 to 3 the
+-- abilities. `point` is the ground point for point-aimed abilities.
+export type AbilityCastRequest = {
+	slot: number,
+	direction: Vector3,
+	point: Vector3?,
+}
+
+-- Someone cast an ability (for effects). `origin` is where the shape starts (after any dash),
+-- `target` its centre or the end of a line, `delay` the seconds until it resolves.
+export type AbilityFxEvent = {
+	caster: number,
+	class: string,
+	slot: number,
+	origin: Vector3,
+	target: Vector3,
+	direction: Vector3,
+	delay: number,
+}
+
 export type LaunchEvent = {
 	from: Vector3,
 	to: Vector3,
@@ -116,6 +136,12 @@ export type LaunchEvent = {
 	apex: number,
 	-- What it flies to, for the toast (e.g. "top outer guardian").
 	label: string,
+}
+
+export type AnnounceEvent = {
+	text: string,
+	-- Toast kind: "info", "success", "warning" or "danger".
+	kind: string,
 }
 
 export type RoundSummary = {
@@ -317,6 +343,35 @@ return Net.define({
 		}) :: Guard.Check<RaidAlertEvent>,
 	}),
 
+	-- Classes ------------------------------------------------------------------------------
+
+	AbilityCast = Net.clientToServer({
+		check = Guard.struct({
+			slot = Guard.number({ integer = true, min = 0, max = 3 }),
+			direction = Guard.vector3(),
+			point = Guard.optional(Guard.vector3()),
+		}) :: Guard.Check<AbilityCastRequest>,
+		rateLimit = { rate = 10, burst = 16 },
+	}),
+
+	AbilityFx = Net.serverToClient({
+		check = Guard.struct({
+			caster = id,
+			class = Guard.string(16),
+			slot = id,
+			origin = Guard.vector3(),
+			target = Guard.vector3(),
+			direction = Guard.vector3(),
+			delay = finite,
+		}) :: Guard.Check<AbilityFxEvent>,
+	}),
+
+	-- Choose the active class: on first join, at the base class station, or while dead.
+	ChooseClass = Net.clientToServer({
+		check = Guard.string(16),
+		rateLimit = { rate = 1, burst = 3 },
+	}),
+
 	-- To the launching player: fly this arc (Shared.Launchers).
 	Launch = Net.serverToClient({
 		check = Guard.struct({
@@ -326,6 +381,14 @@ return Net.define({
 			apex = finite,
 			label = Guard.string(64),
 		}) :: Guard.Check<LaunchEvent>,
+	}),
+
+	-- A short message for everyone (or a team): bounties, the jungle boss.
+	Announce = Net.serverToClient({
+		check = Guard.struct({
+			text = Guard.string(200),
+			kind = Guard.string(16),
+		}) :: Guard.Check<AnnounceEvent>,
 	}),
 
 	-- Rounds ---------------------------------------------------------------------------------

@@ -92,6 +92,9 @@ local function covers(e: Remotes.MonsterActionEvent, x: number, z: number): (boo
 	return true, -e.dz * side, e.dx * side
 end
 
+-- Shared with the class bots (ClassBotService).
+AvoidTestService.covers = covers
+
 local function breakdown(coveredBy: { [string]: number }, hitsBy: { [string]: number }): string
 	local parts = {}
 	for _, shape in { "circle", "cone", "line" } do
@@ -244,7 +247,7 @@ function AvoidTestService.clearTest(
 		return `No camp {index} (1 to {CampService.count()}).`
 	end
 	running = true
-	local stats = Stats.compute(Config.get().combat.knight, level)
+	local stats = Stats.compute(Config.get().classDefinitions.knight.stats, level)
 	local walk = Map.get().walkSpeed
 	local moveUntil, vx, vz = 0, 0, 0
 	local lastSwing = -math.huge

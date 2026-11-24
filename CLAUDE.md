@@ -45,7 +45,7 @@ time; tick tasks and record decisions and surprises under each phase's Implement
   Every client-to-server remote has a `Guard` check; never use RemoteEvents directly.
 - **Config:** tunable numbers go in `src/shared/Config`, read with `Config.get()`. Monster types are
   data: one definition file per type in `src/shared/Monsters` (format in `Types.luau`), listed in
-  its `init.luau`.
+  its `init.luau`. Classes and their abilities are data the same way, in `src/shared/Classes`.
 - **UI:** Fusion 0.3 (`ReplicatedStorage.Packages.Fusion`). Colours, sizes and motion come from
   `src/client/UI/Theme.luau`; reusable pieces live in `UI/Components`, screens in `UI/Screens`.
   Design in points at 1600 x 900 and mount screens with `Layout.screen` (scaling and safe area).

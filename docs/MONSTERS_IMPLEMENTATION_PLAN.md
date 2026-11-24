@@ -25,8 +25,8 @@ Working title. "Hatch a Monster" and "Monster Fighters" are the other candidates
 | 7 | Jungle camps and monster kit | Complete |
 | 8 | Eggs and hatcheries | Complete |
 | 9 | Persistence, levels, and pets | Complete |
-| 10 | Classes | Not Started |
-| 11 | Balance, anti-snowball, and telemetry | Not Started |
+| 10 | Classes | Complete |
+| 11 | Balance, anti-snowball, and telemetry | Complete |
 | 12 | Gold, cosmetics, and monetization | Not Started |
 | 13 | UX polish, onboarding, audio, and effects | Not Started |
 | 13B | Mobile and console pass | Not Started |
@@ -764,26 +764,26 @@ Added in the Phase 13B mobile and console pass: a mid-range Android phone (Galax
 
 ## Phase 10: Classes
 
-**Status:** Not Started
+**Status:** Complete (fun gate still deferred from Phase 3)
 
 **Goal:** Four distinct roles that make groups stronger than individuals.
 
 **Tasks**
 
-- [ ] Ability framework: data-defined abilities with cooldown, cost, targeting shape, effects, and client prediction.
-- [ ] Status effect system: slow, stun, shield, heal over time, taunt, damage amplification, with stacking rules.
-- [ ] Knight: block or taunt, gap closer.
-- [ ] Hunter: ranged basic attack, weak-point bonus, trap or snare.
-- [ ] Mage: area damage, crowd control.
-- [ ] Healer: targeted heal, area heal or shield, a damage option so solo play is viable.
-- [ ] Targeting: mouse aim with generous hit shapes for all abilities (auto-aim assist for touch and gamepad in the Phase 13B mobile pass).
-- [ ] First-join class picker, defaulting to Knight.
-- [ ] Class station in each base's spawn area. Switching rules: switch at the class station or on the respawn screen, including mid-round; no switching in the field.
-- [ ] Ability unlocks follow class level: each class has its full core kit by class level 10.
-- [ ] Class-specific level milestone looks (stub visuals), driven by class level.
-- [ ] Healing and support credit: XP and assists for heals and shields.
-- [ ] UI: class picker, ability bar per class, status effect icons.
-- [ ] Balance pass using server-side bots of each class.
+- [x] Ability framework: data-defined abilities with cooldown, cost, targeting shape, effects, and client prediction.
+- [x] Status effect system: slow, stun, shield, heal over time, taunt, damage amplification, with stacking rules.
+- [x] Knight: block or taunt, gap closer.
+- [x] Hunter: ranged basic attack, weak-point bonus, trap or snare.
+- [x] Mage: area damage, crowd control.
+- [x] Healer: targeted heal, area heal or shield, a damage option so solo play is viable.
+- [x] Targeting: mouse aim with generous hit shapes for all abilities (auto-aim assist for touch and gamepad in the Phase 13B mobile pass).
+- [x] First-join class picker, defaulting to Knight.
+- [x] Class station in each base's spawn area. Switching rules: switch at the class station or on the respawn screen, including mid-round; no switching in the field.
+- [x] Ability unlocks follow class level: each class has its full core kit by class level 10.
+- [x] Class-specific level milestone looks (stub visuals), driven by class level.
+- [x] Healing and support credit: XP and assists for heals and shields.
+- [x] UI: class picker, ability bar per class, status effect icons.
+- [x] Balance pass using server-side bots of each class.
 
 **Acceptance tests**
 
@@ -795,32 +795,75 @@ Added in the Phase 13B mobile and console pass: a mid-range Android phone (Galax
 
 **Implementation notes**
 
-_None yet._
+- **Data, not code.** Each class is one file in `src/shared/Classes` (format in `Types.luau`): stats, weapon, basic attack (left mouse), three abilities (keys 1, 2, 3; gamepad L1, Y, R1) and milestone looks. An ability is an aim (self, direction, point, ally), a shape (circle, cone, line), effect lists for enemies, allies and self, and optional dash, delay, trap and projectile speed. `Shared.Abilities` resolves aim and shapes (pure, tested); `AbilityService` applies effects. Players and class bots cast through the same `AbilityService.cast`.
+- **Kits** (unlock levels 1, 4, 8; full kit by 8):
+  - Knight (tank, 120 health, defence 25): Slash (the Phase 3 sword path, tuning panel included), Charge (dash, hit and slow), Rally (taunt monsters and minions, self shield), Shield Bash (cone, stun).
+  - Hunter (85 health): Arrow (long line, +35% against monsters: weak points), Volley (cone), Snare Trap (armed trap that snares), Marked Shot (target takes +25% damage from everyone).
+  - Mage (80 health): Arcane Bolt, Fireball (point, projectile), Frost Nova (slow around you), Arcane Prison (delayed area stun).
+  - Healer (95 health): Smite (its damage option), Mend (ally heal plus heal over time), Sanctuary (area heal, and burns enemies), Barrier (area shield). Everything the Healer casts on allies also empowers them: +20% damage for 6 s.
+- **Statuses** (`Shared.Combat.Status`, pure, tested): slow (strongest applies, capped at 80%), stun (no stacking, 1.5 s immunity afterwards), shield (sources add up to 60% of max health; the shield ending first drains first), heal over time (adds up), taunt (latest wins), vulnerable and empower (strongest applies, no adding up). Vulnerable and shields are part of the one damage pipeline (`Damage.apply`); empower scales the attacker's hits in `CombatService.applyHit`. Structures are immune to stun, slow and taunt. A stun on a monster cancels its telegraphed attack (`MonsterBrain.interrupt`). Players' statuses replicate as the `Statuses` attribute (HUD labels); slows and stuns change walk speed (stun: no jumping, attacking or casting).
+- **Teamwork** (decision): a monster takes +12% damage for each distinct class beyond the first that hit it in the last 6 s (+36% for all four). Without it, roles only added up: with no real danger in a 15 s fight, a support slot always lost a raw damage race (four Knights cleared centre camps fastest).
+- **Aim:** directions snap to the enemy nearest the aim within a 30-degree cone, on both client and server. Lines are 2.5 to 3 studs wide on each side. Points land under the mouse, clamped to range, or ahead of the character without a mouse. Ally aim picks the ally nearest the aim within 50 degrees, else yourself.
+- **Cost:** cooldowns only, no mana (decision).
+- **Classes and switching:**
+  - Each class keeps its own level and XP; the profile gained `classChosen`. Until a class is picked, the player has `NeedsClass` and the picker opens; closing it keeps Knight.
+  - Switching is allowed at the base class station (a prompt beside spawn), while dead (a "Change class" button on the respawn screen), or on first join. The server refuses it elsewhere (verified: refused 24 studs from the station, accepted beside it).
+  - Cooldowns are kept per class and slot, so switching does not reset or share them.
+- **Support credit:** heals, heal over time, and shields that absorb damage on someone else give 0.25 XP per point and make the healer a supporter. Supporters of the killer or an assister within 10 s get an assist. Self-heals give nothing.
+- **Milestone looks** (stubs): per class weapon (sword, bow, staff, wand) with an accent colour from level 10, a glow from 25 and sparkles from 50.
+- **Camps:** tier 3 (centre) camps are now group content: health x4 (was 1.9), damage x3 (was 1.3).
+- **Balance bots** (`ClassBotService`, dev):
+  - Each bot plays its class sensibly: band distances, abilities on cooldown, a healer that keeps blessings up and heals the most hurt.
+  - Bots dodge telegraphs, but with the player dodge cooldown and a 25% chance of reacting too late.
+  - In camp tests a dead bot stays out, since a real death means respawning at base.
+  - Commands: `/classclear`, `/classfight`, `/classbots`, `/class`, `/statuses`.
+- **Acceptance, mixed group:** centre camps, level 20, two runs each, seconds from first hit:
+
+  | Group | C3 (Burrower) | C6 (Splitter) | C9 (Shellback) | Average |
+  |---|---|---|---|---|
+  | Mixed (Knight, Hunter, Mage, Healer) | 13.1, 12.5 | 15.1, 10.6 | 13.0, 16.2 | 13.4 |
+  | 4 Knights | 19.2, 17.8 | 14.7, 17.0 | 17.5, 25.6 | 18.6 |
+  | 4 Hunters | 16.1, 15.2 | 26.7, 35.4 | 17.2, 9.0 | 19.9 |
+  | 4 Mages | 24.8, wiped | 51.3, not in 90 s | 13.8, 16.2 | worst |
+
+- **Acceptance, Healer XP:** 4v4 mixed bot skirmish in the middle lane with minion waves, 5 minutes, XP per bot. Run 1: Healer 2070, Hunter 1899, Mage 1578, Knight 736. Run 2 (sturdier Knight): Healer 1978, Hunter 1984, Mage 1717, Knight 688. The Healer's XP came from assists (650 to 850), kills, support (about 250) and minions.
+- **Acceptance, aim:** every ability resolves through aim assist, a clamped point, or a self or ally pick. Verified in Studio by casting each kit at gym targets: Mark's +25% shows on the next arrow (19 to 24); Prison stunned the slam monster; Rally taunted and shielded; Bash stunned; Mend healed 41 then ticked; Barrier shielded.
+- **Performance gate (approximated low-end PC, 2 cores, graphics level 1, restored afterwards):** Phase 9 load plus `/classbots 20` (40 class bots using abilities).
+  - Load: 1152 minions (waves piled up behind the fight in the middle: double Phase 9's), 210 NPCs, 113 monsters (92 awake), up to 6 traps.
+  - Per frame: minion tick 2.95 ms (worst 4.3), NPCs, monsters and class bots 0.41 ms (0.28 before), about 3.4 ms in all.
+  - Server held 60 Hz (95th percentile 18.1 ms, worst 19.6); client simulation held 60 Hz; server send 26.5 KB/s.
+  - The Studio viewport was not rendering in this session, so client render frame rate was not measured. Rerun it with the viewport visible.
+- **Carried forward to Phase 11:**
+  - The Knight earns a third of the others' XP in PvP skirmishes: it dies about every 14 s leading the charge, since taunt does not affect players. More health and defence did not change that.
+  - Four Mages struggle against single big monsters.
+  - Mage AoE hits minions near camps.
+  - Teamwork and blessing should show in the UI (boss bar).
+  - Human checks: the picker and station flow by mouse, ability feel, effect readability.
 
 ---
 
 ## Phase 11: Balance, anti-snowball, and telemetry
 
-**Status:** Not Started
+**Status:** Complete (human-data checks pending: the acceptance numbers below come from the round simulator and class bots)
 
 **Goal:** Rounds that swing back and forth and then resolve, measured with data.
 
 **Tasks**
 
-- [ ] Telemetry events per Appendix B, sent to Roblox analytics and to a custom sink for round-level analysis.
-- [ ] Team fill: joiners go to the smaller team, then the weaker team by strength (Phase 2), then the losing team; minion waves scale up for a team that is short on players or strength.
-- [ ] Strength equalisers driven by `TeamService.balance()`: small, capped adjustments for the weaker team (for example minion wave strength, respawn time, objective rewards), scaled by the strength gap. They nudge matches towards even and never let a far weaker player beat a far stronger one alone.
-- [ ] Escalation: wave strength grows over the round and siege minions appear after a set time so rounds end.
-- [ ] Fading comeback help: defender bonuses are strong early and decay after a set time.
-- [ ] Power score per player (active class level, active pet) for bounty and underdog logic; this is the same value as `TeamService.powerOf`, so team strength and individual power agree.
-- [ ] Bounties: high power score or kill streak marks a player and adds a reward for defeating them.
-- [ ] Underdog bonus: attackers deal extra damage to a target in proportion to the power gap, capped (Appendix A).
-- [ ] Full, unsplit assist rewards.
-- [ ] Round payout: contribution-based, losing team receives most of the winner's amount, bonus for long and close rounds, bonus for staying to the end.
-- [ ] Leaver handling and idle detection.
-- [ ] Neutral jungle boss on a timer as a planned swing moment.
-- [ ] Bot-versus-bot overnight simulation to tune numbers before human tests, run headless under Lune on the pure simulation modules (see section 2) via a `make` target.
-- [ ] Balance dashboard: round length distribution, first-guardian win rate, front-line reversals per round, class pick and win rates.
+- [x] Telemetry events per Appendix B, sent to Roblox analytics and to a custom sink for round-level analysis.
+- [x] Team fill: joiners go to the smaller team, then the weaker team by strength (Phase 2), then the losing team; minion waves scale up for a team that is short on players or strength.
+- [x] Strength equalisers driven by `TeamService.balance()`: small, capped adjustments for the weaker team (for example minion wave strength, respawn time, objective rewards), scaled by the strength gap. They nudge matches towards even and never let a far weaker player beat a far stronger one alone.
+- [x] Escalation: wave strength grows over the round and siege minions appear after a set time so rounds end.
+- [x] Fading comeback help: defender bonuses are strong early and decay after a set time.
+- [x] Power score per player (active class level, active pet) for bounty and underdog logic; this is the same value as `TeamService.powerOf`, so team strength and individual power agree.
+- [x] Bounties: high power score or kill streak marks a player and adds a reward for defeating them.
+- [x] Underdog bonus: attackers deal extra damage to a target in proportion to the power gap, capped (Appendix A).
+- [x] Full, unsplit assist rewards.
+- [x] Round payout: contribution-based, losing team receives most of the winner's amount, bonus for long and close rounds, bonus for staying to the end.
+- [x] Leaver handling and idle detection.
+- [x] Neutral jungle boss on a timer as a planned swing moment.
+- [x] Bot-versus-bot overnight simulation to tune numbers before human tests, run headless under Lune on the pure simulation modules (see section 2) via a `make` target.
+- [x] Balance dashboard: round length distribution, first-guardian win rate, front-line reversals per round, class pick and win rates.
 
 **Acceptance tests**
 
@@ -833,7 +876,66 @@ _None yet._
 
 **Implementation notes**
 
-_None yet._
+- **Rules are pure** (`Shared.Balance`, tested): equalisers, escalation and siege counts, the behind bonus, fading defender help, underdog, bounties, payout, idle, and front-line reversals. `BalanceService` applies them through hooks: `MinionService.strengthOf` and `siegeCount`, `MonsterService.defenderRespawnScale`, `CharacterService.respawnScale` (wrapped), `ProgressionService.rewardScale`, `TeamService.behindTeam`, and `TeamService.powerOf` (wrapped so idle players count 0).
+- **Wave strength per team** is the equaliser x escalation x behind bonus x jungle boss buff, applied to new minions' health and damage.
+  - Equaliser: up to +25% waves, -25% respawn and +20% XP. It reaches full strength at a 40% strength gap; short-handed teams get +5% waves per missing player, up to +15%.
+  - Escalation: from minute 8, +8% a minute, up to x2. Siege minions (200 health, 22 damage) join each wave from minute 12, one more every 5 minutes, up to 3.
+  - Behind bonus: +20% waves per structure lost beyond the other team, up to +50%.
+- **Comeback help:** defender respawn help (x0.5) now applies while any of a team's structures is under attack, not only the Titan. It fades to nothing between minutes 10 and 25.
+- **Underdog:** damage between players (and class bots) is multiplied by 1 + 0.5 x (target power / attacker power - 1), capped at +25%.
+- **Bounties:** power 1.35 or a 4-kill streak puts a bounty on a player: 50 XP plus 15 per kill past 4, up to 200. It shows on their nameplate and is announced when placed and when claimed.
+- **Payout** (replaces the flat 200/100 round XP): 200 for a win, 80% of that for a loss. Contribution (score against the round average, now including healing) moves it by up to ±30%. Long rounds add up to +25% (15 to 30 min), close rounds add up to +25%, and staying for the second half adds 50. Seen in Studio: a win with the clock fast-forwarded paid 265.
+- **Unsplit rewards:** assists now pay the full kill XP (50), and camp monster XP goes in full to everyone who damaged the monster.
+- **Idle:**
+  - After 3 minutes without movement or combat, a player gets the `Idle` attribute: their power counts 0, "idle" shows on their nameplate, and they get a toast. Moving clears it.
+  - Removed after 15 minutes (not in Studio).
+- **Leavers:** when a leave makes the teams differ by two or more, the next player on the bigger team to die respawns on the smaller team, with a toast.
+- **Jungle boss** (`JungleBossService`, new monster type Warden: 6000 health, slam, tail, charge, calls splitlings at half health):
+  - It appears at minute 10, then 8 minutes after each death, alternating between the north and south pits between the centre walls.
+  - Its killers' team gets waves x1.5 for 120 s, and that team gets 150 XP near the pit. Everyone is told.
+  - Verified in Studio: it spawned on schedule; killing it announced "Red slew the Warden", set Red's waves to x1.5 and gave 150 XP.
+- **Telemetry** (`Shared.Telemetry`, tested; `TelemetryService`):
+  - Appendix B events plus `boss_killed` and `bounty_claimed`. Player events go to `AnalyticsService:LogCustomEvent` (one value, three custom fields), batched by design: one event per action.
+  - Every event goes into the round log. Lane control (from the minion fronts) and team sizes are sampled every 10 s, server frame time every 30 s.
+  - At round end the log becomes one compact record (length, winner, average team sizes, front-line reversals, first guardian, kills, camps, eggs, bosses, class and result per player, frame time). It is saved to `<prefix>telemetry_v1` (last 200 rounds, one write per round).
+  - `/dashboard` shows the round length distribution, first-guardian win rate, reversals per round, and class pick and win rates.
+  - Verified: a round ended with `/endround` was saved and appeared on the dashboard.
+  - `economy`, `purchase` and `onboarding_step` are defined but unused until Phases 12 and 13.
+- **Round simulator** (`Shared.RoundSim`, `make sim`; about 6,000 rounds in a few seconds).
+  - What it uses from the game: structure health, gating, respawn rules and every Phase 11 rule.
+  - Players have power (levels and pets: what the game balances on) and a per-round skill factor (log-normal, about ±40%, invisible to the game).
+  - Fights scale with power squared (health x damage); pushing scales with power.
+  - Calibration found two model bugs: the underdog bonus was applied to all pushing, which erased any power edge; and a plain LCG's correlated values biased per-player rolls (now xorshift).
+  - Calibrated with seeds 1 and 7, 1500 rounds per scenario, 10 v 10:
+
+  | Scenario | Median length | First guardian wins | Team 1 wins | Reversals |
+  |---|---|---|---|---|
+  | Even teams | 22.2 to 22.7 min | 56.9 to 57.9% | 48.8 to 49.2% | 6.3 |
+  | Team 1 at 55% strength | 18.9 to 20.6 min | 60.4 to 61.0% | 56.4 to 61.1% | 5.7 |
+  | Team 1 at 60% strength | 15.1 to 15.4 min | 70.9 to 72.6% | 73.2 to 73.4% | 4.5 |
+  | Team 1 one player short | 23.0 to 23.4 min | 57.2 to 58.0% | 51.4 to 51.8% | 6.2 |
+
+  - Without skill noise, a whole team 1.5x stronger (60% share) wins about 63%. Equalisers soften the edge but do not erase it (unit test).
+- **Structure health** is now x0.7 (outer 2100, inner 2800, Titan 5600). It took this to bring the simulated median into 20 to 30 minutes, and it fits Phase 6, where bots could not finish the Titan.
+- **Acceptance, three new against one maxed:** class bots in the gym; level 1 with no pet, against level 500 with a maxed pet (power 1.5). The three new players won all six matchups:
+  - Knights against a Knight (5.2 s, one standing).
+  - Hunters against a Hunter (1.6 s).
+  - Mages against a Mage (1.0 s, all standing).
+  - Knight, Hunter and Healer against a Knight (3.9 s).
+  - Knights against a Hunter (3.4 s).
+  - Healers against a Knight (6.2 s).
+  - A unit test checks the same with the stat function alone.
+- **Performance gate (approximated low-end PC, 2 cores, graphics level 1, restored afterwards):** Phase 10 load (`/loadtest`, `/siege`, `/unleash 20`, `/pets 40`, `/classbots 20`) with the round aged 16 minutes (escalation and siege minions on).
+  - Load: 1056 minions, 208 NPCs, 116 monsters.
+  - Per frame: minion tick 2.49 ms (worst 3.6), NPCs 0.35 ms.
+  - Server held 60 Hz (p99 19.0 ms); client simulation held 60 Hz; send 26.9 KB/s.
+  - Telemetry only reacts to signals and samples on slow timers.
+  - One isolated server frame of 76 to 96 ms appeared about once a minute; it does not follow the 12 s waves or the 30 s telemetry timer (likely garbage collection at this minion count). To profile with the MicroProfiler in Phase 14.
+- **Carried forward:**
+  - Player fights are very short: three Mages remove a maxed Mage in 1 s. Time to kill is for the fun gate.
+  - Round numbers must be checked against human telemetry once players exist (the simulator's skill spread and lane model are assumptions).
+  - The Knight's PvP XP (Phase 10) is still to be fixed.
+  - The Warden and wave buffs should appear on the minimap and HUD.
 
 ---
 
@@ -1097,3 +1199,14 @@ Record decisions here as they are made, with the date and the reason.
 | 2026-11-23 | Pets cannot be targeted or damaged, never summon, and run through MonsterService (the monster kit) rather than the minion arrays | Pets need the monster attacks and telegraphs; at most 40 exist; untargetable companions avoid griefing and keep the 1.5x power ceiling the only pet effect on fights |
 | 2026-11-23 | NPC snapshots are filtered per client by the interest radius | Monster and pet counts grew; this cut server send at the full load test from 32.5 to 21.9 KB/s |
 | 2026-11-23 | Launch pads: one per lane in each base, flying the player in an arc to the furthest guardian their team still holds in that lane (outer, then inner; idle once both fall). No attacking or dodging mid-flight; egg carriers cannot launch; the client flies its own character and the server corrects a flight that does not arrive | The map took too long to cross (owner request). Landing at your own guardian keeps launches defensive and never drops you behind enemy lines (Shared.Launchers, LauncherService, LauncherController) |
+| 2026-11-23 | Abilities cost cooldowns only (no mana or other resource) | Casual game; one fewer bar to read; cooldowns already pace casting |
+| 2026-11-23 | Teamwork: monsters take +12% damage per distinct class beyond the first among recent attackers (max +36%) | Without it roles only add up, so stacking the highest damage class beats any mixed group in short fights; this makes "four distinct roles" pay off directly and visibly |
+| 2026-11-23 | The Healer's casts on allies also empower them (+20% damage, no stacking); "damage amplification" exists both as vulnerable (target) and empower (attacker) | Gives the support role a way to speed up fights, not only prevent deaths |
+| 2026-11-23 | Centre (tier 3) camps are group content: health x4, damage x3 | They are the contested middle; at x1.9 a group of four cleared them in 8 s with no danger, so roles never mattered |
+| 2026-11-23 | Class cooldowns are kept per class and slot; switching class is only at the base station, while dead, or on first join | Switching cannot reset or share cooldowns, and nobody swaps kits mid-fight |
+| 2026-11-23 | A behind bonus (stronger waves per structure lost beyond the other team, capped) and defender respawn help for any structure under attack | In simulation, without them the team that took the first guardian won about 73% of rounds; with them, 57 to 58% |
+| 2026-11-23 | Structure health x0.7 | Needed for a 20 to 30 minute median in simulation; matches Phase 6, where bots could not finish the Titan |
+| 2026-11-23 | Assists pay the full kill XP; camp monster XP is given in full to every contributor | "Full, unsplit" rewards: helping is never worth less than finishing |
+| 2026-11-23 | The round payout replaces the flat win/loss XP | Contribution, closeness, length and staying now matter; losers still get 80% |
+| 2026-11-23 | Telemetry's custom sink is a DataStore of compact round records (last 200), one write per round | No external service needed; enough for the balance dashboard; within DataStore budgets |
+| 2026-11-23 | The round simulator models skill as a hidden per-round factor and fights as power squared | Without skill, power alone decided rounds; without power squared, power barely mattered |

@@ -32,6 +32,7 @@ local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Round = require(ReplicatedStorage.Shared.Round)
 local Shapes = require(ReplicatedStorage.Shared.Combat.Shapes)
 local Signal = require(ReplicatedStorage.Shared.Signal)
+local Status = require(ReplicatedStorage.Shared.Combat.Status)
 local Structures = require(ReplicatedStorage.Shared.Combat.Structures)
 local Tuning = require(ReplicatedStorage.Shared.Combat.Tuning)
 
@@ -134,6 +135,13 @@ local MonsterService = {
 	},
 	-- (structure, killerId, assistIds)
 	structureDestroyed = Signal.new() :: Signal.Signal<Structures.Structure, number, { number }>,
+	-- (monster, phase) when a monster enters a new phase (Titan phases for telemetry).
+	phased = Signal.new() :: Signal.Signal<Monster, number>,
+	-- Respawn scale for a team while any of its structures is under attack (BalanceService fades
+	-- it over the round).
+	defenderRespawnScale = function(): number
+		return Config.get().structures.defenderRespawnScale
+	end,
 	-- Every telegraph as broadcast, with the attacking monster's team (dev avoid test).
 	telegraphed = Signal.new() :: Signal.Signal<Remotes.MonsterActionEvent, number?>,
 	-- Every monster spawned (including summons and split pieces), and every monster defeated
@@ -150,6 +158,9 @@ local monsters: { [number]: Monster } = {}
 local structures: { [string]: Monster } = {}
 local dead: { [string]: boolean } = {}
 local alertUntil: { [number]: number } = { [1] = 0, [2] = 0 }
+-- Until when each team counts as defending (any of its structures recently damaged): its players
+-- respawn faster (Phase 11 comeback help, fading over the round).
+local defendUntil: { [number]: number } = { [1] = 0, [2] = 0 }
 local projectiles: { Projectile } = {}
 local folder: Folder
 local healthScaleOverride: number? = nil
@@ -304,6 +315,16 @@ local function chooseTarget(m: Monster, t: number): number
 end
 
 local function currentTarget(m: Monster, t: number): CombatService.Entry?
+	-- Taunted: attack the taunter while it lives.
+	local taunter = Status.taunter(m.row.entry.combatant.statuses, t)
+	if taunter then
+		local forced = CombatService.entry(taunter)
+		if forced and forced.combatant.alive then
+			m.target = taunter
+			m.retargetAt = t + RETARGET_SECONDS
+			return forced
+		end
+	end
 	local entry = if m.target ~= 0 then CombatService.entry(m.target) else nil
 	if entry == nil or not entry.combatant.alive or entry.gated or t >= m.retargetAt then
 		m.target = chooseTarget(m, t)
@@ -568,6 +589,7 @@ handle = function(m: Monster, event: MonsterBrain.Event?, target: CombatService.
 		local e = action(m, "phase")
 		e.value = event.phase :: number
 		broadcast(m, e)
+		MonsterService.phased:fire(m, event.phase :: number)
 	end
 end
 
@@ -584,6 +606,11 @@ local function tickMonster(m: Monster, t: number, dt: number)
 		end
 		m.awake = true
 		m.busyAt = t
+	end
+	-- Stunned: no moving, no attacking (MonsterService.interrupt cancelled any attack).
+	if Status.stunned(row.entry.combatant.statuses, t) then
+		m.busyAt = t
+		return
 	end
 
 	local target = currentTarget(m, t)
@@ -604,7 +631,7 @@ local function tickMonster(m: Monster, t: number, dt: number)
 	local moving = false
 	if def.speed > 0 and m.brain.state == "idle" then
 		local gx, gz, stop = row.home.X, row.home.Z, 0.5
-		local speed = def.speed
+		local speed = def.speed * Status.speedMultiplier(row.entry.combatant.statuses, t, Config.get().classes.status)
 		local lane = m.lane
 		local follow = m.follow
 		if follow then
@@ -703,6 +730,7 @@ local function onDamaged(m: Monster, result: Damage.Result)
 	local s = m.structure
 	if s then
 		setHealthAttribute(m)
+		defendUntil[s.team] = t + config().structures.alertSeconds
 		if s.kind == "titan" then
 			alertUntil[s.team] = t + config().structures.alertSeconds
 		end
@@ -849,6 +877,8 @@ local function spawnStructures()
 	for _, s in Structures.list(Map.get()) do
 		local m = spawnMonster(s.kind, Vector3.new(s.position.x, 0, s.position.z), s.team, s)
 		structures[s.key] = m
+		-- Structures cannot be stunned, slowed or taunted.
+		m.row.entry.ccImmune = true
 		setHealthAttribute(m)
 	end
 	updateGating()
@@ -864,6 +894,7 @@ function MonsterService.resetStructures()
 	table.clear(structures)
 	table.clear(dead)
 	alertUntil[1], alertUntil[2] = 0, 0
+	defendUntil[1], defendUntil[2] = 0, 0
 	table.clear(projectiles)
 	spawnStructures()
 end
@@ -890,6 +921,17 @@ end
 
 function MonsterService.isDead(key: string): boolean
 	return dead[key] == true
+end
+
+-- A stun landed on monster `npcId`: cancel its attack in progress and hold it for `seconds`.
+-- Structures are immune.
+function MonsterService.interrupt(npcId: number, seconds: number)
+	local m = monsters[npcId]
+	if m == nil or m.structure or not m.row.alive then
+		return
+	end
+	m.token += 1
+	MonsterBrain.interrupt(m.brain, now(), seconds)
 end
 
 -- How many monsters are awake (perf report).
@@ -1081,8 +1123,8 @@ function MonsterService.init(_self: typeof(MonsterService))
 
 	CharacterService.respawnScale = function(player: Player): number
 		local team = TeamService.teamOf(player)
-		if team and (alertUntil[team] or 0) > now() then
-			return config().structures.defenderRespawnScale
+		if team and (defendUntil[team] or 0) > now() then
+			return MonsterService.defenderRespawnScale()
 		end
 		return 1
 	end

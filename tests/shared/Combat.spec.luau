@@ -11,7 +11,7 @@ local Stats = require("../../src/shared/Combat/Stats")
 local TestKit = require("../TestKit")
 local Tuning = require("../../src/shared/Combat/Tuning")
 
-local KNIGHT = Config.resolve("test").combat.knight
+local KNIGHT = Config.resolve("test").classDefinitions.knight.stats
 
 local function hit(source: number, team: number?, amount: number, now: number): Damage.Hit
 	return { sourceId = source, sourceTeam = team, amount = amount, kind = "melee", now = now }

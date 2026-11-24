@@ -5,6 +5,8 @@
 -- `Config.resolve(environment)` is pure (no engine access) so it can be unit tested under Lune.
 
 local Environment = require("@self/Environment")
+local Balance = require("./Balance")
+local Classes = require("./Classes")
 local Monsters = require("./Monsters")
 
 export type Environment = Environment.Environment
@@ -56,12 +58,18 @@ export type Config = {
 	minions: MinionConfig,
 	-- Monster definitions by ID (guardians, Titans, gym monsters; jungle monsters from Phase 7).
 	monsters: { [string]: MonsterDefinition },
+	-- Class definitions by ID (Shared.Classes) and class rules.
+	classDefinitions: { [string]: Classes.Class },
+	classes: ClassConfig,
 	camps: CampConfig,
 	eggs: EggConfig,
 	progression: ProgressionConfig,
 	data: DataConfig,
 	structures: StructureConfig,
 	launchers: LauncherConfig,
+	-- Phase 11 balance: equalisers, escalation, comeback help, underdog, bounties, payout,
+	-- idle detection and the jungle boss (rules in Shared.Balance).
+	balance: Balance.BalanceConfig,
 }
 
 -- Monster definitions live in Shared.Monsters (one file per type); these are re-exported here.
@@ -115,7 +123,7 @@ export type ProgressionConfig = {
 	xp: {
 		-- Per minion with proximity credit.
 		minion: number,
-		-- Per hit point of a defeated camp monster, shared by everyone who damaged it.
+		-- Per hit point of a defeated camp monster, in full to everyone who damaged it.
 		monsterPerHealth: number,
 		-- Per structure destroyed, to every player on the attacking team within structureRange.
 		outerGuardian: number,
@@ -129,10 +137,10 @@ export type ProgressionConfig = {
 		eggDeposited: number,
 		eggHatched: number,
 		raid: number,
-		roundWin: number,
-		roundLoss: number,
 		-- To the owner of an unleashed monster, per point of damage it deals.
 		unleashPerDamage: number,
+		-- Per point of health healed on (or damage shielded for) another player or bot.
+		healPerHealth: number,
 	},
 	-- Pets deal this fraction of their monster type's damage.
 	petDamageScale: number,
@@ -197,6 +205,29 @@ export type LauncherConfig = {
 	cooldownSeconds: number,
 }
 
+-- Class rules (Phase 10). Class definitions live in Shared.Classes.
+export type ClassConfig = {
+	-- New profiles start as this class (the first-join picker defaults to it).
+	default: string,
+	-- Status effect stacking rules (Shared.Combat.Status).
+	status: { maxSlow: number, stunImmunity: number, maxShieldFraction: number },
+	-- Aim assist cones in degrees (total): enemies for direction aim, allies for ally aim.
+	aimAssistCone: number,
+	allyAssistCone: number,
+	-- Casts may arrive this much earlier than their cooldown (network jitter).
+	cooldownTolerance: number,
+	-- Switching class is allowed within this distance of your base's class station.
+	stationRange: number,
+	-- How often statuses tick (heal over time, expiry, movement).
+	statusTickSeconds: number,
+	-- Heals and shields within this many seconds make the healer an assist on the ally's kills.
+	supportWindow: number,
+	-- Teamwork: a monster takes this much more damage for each distinct class beyond the first
+	-- that hit it within teamworkWindow seconds (four classes: three times this).
+	teamworkPerClass: number,
+	teamworkWindow: number,
+}
+
 export type StructureConfig = {
 	-- Multiplies every guardian and Titan's health (dev testing; 1 in play).
 	healthScale: number,
@@ -238,10 +269,10 @@ export type MinionConfig = {
 	interestRadius: number,
 	-- Every minion in range is resent this often even if unchanged.
 	keyframeSeconds: number,
-	kinds: { melee: MinionKindConfig, ranged: MinionKindConfig },
+	kinds: { melee: MinionKindConfig, ranged: MinionKindConfig, siege: MinionKindConfig },
 }
 
--- Base stats for a class at level 1 with no pet. Phase 10 adds the other classes.
+-- Base stats for a class at level 1 with no pet (each class file in Shared.Classes has them).
 export type ClassStats = {
 	maxHealth: number,
 	damage: number,
@@ -276,7 +307,6 @@ export type CombatConfig = {
 		-- Multiplies every gym enemy's health.
 		enemyHealthScale: number,
 	},
-	knight: ClassStats,
 	-- Most targets one melee swing can hit.
 	maxTargets: number,
 	-- Extra range allowed on the server for movement between client and server.
@@ -375,7 +405,6 @@ local function base(environment: Environment): Config
 				knockback = 20,
 				enemyHealthScale = 1,
 			},
-			knight = { maxHealth = 100, damage = 20, defence = 0 },
 			maxTargets = 3,
 			rangeTolerance = 2,
 			cooldownTolerance = 0.05,
@@ -436,16 +465,31 @@ local function base(environment: Environment): Config
 			kinds = {
 				melee = { maxHealth = 40, damage = 6, attackRange = 3.5, attackCooldown = 1.2, speed = 9, radius = 1.4 },
 				ranged = { maxHealth = 30, damage = 5, attackRange = 14, attackCooldown = 1.6, speed = 9, radius = 1.2 },
+				-- Phase 11 escalation: siege minions join waves late in a round so rounds end.
+				siege = { maxHealth = 200, damage = 22, attackRange = 4.5, attackCooldown = 1.6, speed = 7, radius = 2 },
 			},
 		},
 		monsters = Monsters,
+		classDefinitions = Classes,
+		classes = {
+			default = "knight",
+			status = { maxSlow = 0.8, stunImmunity = 1.5, maxShieldFraction = 0.6 },
+			aimAssistCone = 30,
+			allyAssistCone = 50,
+			cooldownTolerance = 0.05,
+			stationRange = 14,
+			statusTickSeconds = 0.1,
+			supportWindow = 10,
+			teamworkPerClass = 0.12,
+			teamworkWindow = 6,
+		},
 		camps = {
 			types = { "splitter", "shellback", "burrower" },
 			tierEdges = { 350, 180 },
 			tiers = {
 				{ healthScale = 1, damageScale = 1, respawnSeconds = 60, rarity = "common" },
 				{ healthScale = 1.4, damageScale = 1.15, respawnSeconds = 75, rarity = "rare" },
-				{ healthScale = 1.9, damageScale = 1.3, respawnSeconds = 90, rarity = "epic" },
+				{ healthScale = 4, damageScale = 3, respawnSeconds = 90, rarity = "epic" },
 			},
 			leashRange = 45,
 			resetSeconds = 6,
@@ -488,14 +532,13 @@ local function base(environment: Environment): Config
 				titan = 300,
 				structureRange = 120,
 				kill = 50,
-				assist = 25,
+				assist = 50,
 				campClear = 40,
 				eggDeposited = 30,
 				eggHatched = 40,
 				raid = 60,
-				roundWin = 200,
-				roundLoss = 100,
 				unleashPerDamage = 0.1,
+				healPerHealth = 0.25,
 			},
 			petDamageScale = 0.3,
 			petRespawnSeconds = 3,
@@ -509,7 +552,7 @@ local function base(environment: Environment): Config
 			allowMemoryFallback = true,
 		},
 		structures = {
-			healthScale = 1,
+			healthScale = 0.7,
 			provokeSeconds = 4,
 			provokeRange = 36,
 			alertSeconds = 8,
@@ -527,6 +570,50 @@ local function base(environment: Environment): Config
 			minApex = 40,
 			maxApex = 120,
 			cooldownSeconds = 1,
+		},
+		balance = {
+			equaliser = {
+				gapForFull = 0.4,
+				waveStrength = 0.25,
+				respawn = 0.25,
+				reward = 0.2,
+				shortHanded = 0.05,
+				shortHandedMax = 0.15,
+				behindPerStructure = 0.2,
+				behindMax = 0.5,
+			},
+			escalation = {
+				startMinutes = 8,
+				perMinute = 0.08,
+				max = 1,
+				siegeAfterMinutes = 12,
+				siegeEveryMinutes = 5,
+				siegeMax = 3,
+			},
+			comeback = { defenderRespawnScale = 0.5, fadeStartMinutes = 10, fadeEndMinutes = 25 },
+			underdog = { k = 0.5, cap = 0.25 },
+			bounty = { power = 1.35, streak = 4, base = 50, perStreak = 15, max = 200 },
+			payout = {
+				win = 200,
+				loseShare = 0.8,
+				contributionWeight = 0.3,
+				longBonus = 0.25,
+				longFromMinutes = 15,
+				longFullMinutes = 30,
+				closeBonus = 0.25,
+				stayBonus = 50,
+			},
+			idle = { idleSeconds = 180, kickSeconds = 900 },
+			boss = {
+				firstMinutes = 10,
+				respawnMinutes = 8,
+				buffSeconds = 120,
+				waveBuff = 0.5,
+				-- The two jungle pits between the centre walls; the boss alternates between them.
+				positions = { { x = 0, z = -150 }, { x = 0, z = 150 } },
+				killXp = 150,
+				xpRange = 80,
+			},
 		},
 	}
 end

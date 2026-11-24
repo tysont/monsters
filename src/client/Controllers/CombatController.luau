@@ -39,6 +39,9 @@ local LATENCY_SAMPLES = 30
 local CombatController = {
 	name = "CombatController",
 	dependencies = { "NpcRenderController", "MinionRenderController" },
+	-- Set by AbilityController: casts the basic attack for non-melee classes and returns true, or
+	-- returns false to swing the sword.
+	basicOverride = nil :: (() -> boolean)?,
 }
 
 type Swing = { motor: Motor6D, base: CFrame, start: number, duration: number }
@@ -164,7 +167,7 @@ end
 
 -- Targets ----------------------------------------------------------------------------------
 
-type Target = { id: number, position: Vector3, radius: number, model: Model? }
+export type Target = { id: number, position: Vector3, radius: number, model: Model? }
 
 local function hostileTargets(): { Target }
 	local team = myTeam()
@@ -226,6 +229,11 @@ end
 
 local function attack(inputTime: number)
 	if not canAct() then
+		return
+	end
+	-- Classes whose basic attack is not the sword cast it as an ability (AbilityController).
+	local override = CombatController.basicOverride
+	if override and override() then
 		return
 	end
 	local t = os.clock()
@@ -491,6 +499,42 @@ end
 
 function CombatController.dodge()
 	dodge()
+end
+
+-- Alive, on its feet, not stunned, frozen or flying.
+CombatController.canAct = canAct
+
+-- Hostile players, NPCs and nearby minions, for aim assist.
+function CombatController.targets(): { Target }
+	return hostileTargets()
+end
+
+-- Where the player is aiming on the ground plane: the camera, or the character's facing (per
+-- settings).
+function CombatController.aimDirection(): Vector3
+	local _, root = humanoidAndRoot()
+	if root == nil or UiState.peek(UiState.settings.aimWithCamera) then
+		return flat(workspace.CurrentCamera.CFrame.LookVector)
+	end
+	return flat(root.CFrame.LookVector)
+end
+
+-- Plays the arm swing on the local character (casts).
+function CombatController.playCast()
+	local c = character()
+	if c then
+		startSwing(c)
+	end
+end
+
+-- Plays the arm swing on another combatant's model.
+function CombatController.playSwingOn(combatantId: number)
+	local model = modelOf(combatantId)
+	if model then
+		startSwing(model)
+	elseif combatantId < 0 then
+		NpcRenderController.playSwing(combatantId)
+	end
 end
 
 -- Display name for a combatant ID (players by name, NPCs by kind).

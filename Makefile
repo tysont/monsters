@@ -5,10 +5,11 @@
 #   make check      everything that must pass before a commit: format, lint, types, tests
 #   make fix        auto-format
 #   make test       unit tests only (make test FILTER=Guard to run a subset)
+#   make sim        headless round simulation: balance numbers (make sim ARGS="2000 10 1")
 #   make build      build a place file to monsters.rbxl (git-ignored)
 #   make serve      run Rojo in the foreground (normally the "Rojo - monsters" task does this)
 
-.PHONY: setup packages check fmt-check fix lint typecheck test build serve sourcemap
+.PHONY: setup packages check fmt-check fix lint typecheck test sim build serve sourcemap
 
 DEFS := .cache/globalTypes.d.luau
 LUAU_DIRS := src tests scripts
@@ -48,6 +49,9 @@ typecheck: sourcemap $(DEFS)
 
 test:
 	lune run scripts/test $(FILTER)
+
+sim:
+	lune run scripts/sim $(ARGS)
 
 build:
 	rojo build default.project.json --output monsters.rbxl

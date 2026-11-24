@@ -5,8 +5,8 @@
 local Minions = {}
 
 -- Kind codes carried in snapshots (MinionCodec) and their names.
-Minions.KIND_INDEX = table.freeze({ melee = 1, ranged = 2 } :: { [string]: number })
-Minions.KIND_NAMES = table.freeze({ "melee", "ranged" })
+Minions.KIND_INDEX = table.freeze({ melee = 1, ranged = 2, siege = 3 } :: { [string]: number })
+Minions.KIND_NAMES = table.freeze({ "melee", "ranged", "siege" })
 
 -- Minion combatant IDs are -(ID_BASE + network ID), clear of NPC rows (-1 to -65535) and
 -- players (positive UserIds).

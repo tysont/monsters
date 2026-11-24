@@ -14,6 +14,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local Abilities = require(ReplicatedStorage.Shared.Abilities)
+local Balance = require(ReplicatedStorage.Shared.Balance)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Damage = require(ReplicatedStorage.Shared.Combat.Damage)
 local History = require(ReplicatedStorage.Shared.Combat.History)
@@ -26,6 +28,7 @@ local Round = require(ReplicatedStorage.Shared.Round)
 local Signal = require(ReplicatedStorage.Shared.Signal)
 local SpatialGrid = require(ReplicatedStorage.Shared.Combat.SpatialGrid)
 local Stats = require(ReplicatedStorage.Shared.Combat.Stats)
+local Status = require(ReplicatedStorage.Shared.Combat.Status)
 local Tuning = require(ReplicatedStorage.Shared.Combat.Tuning)
 
 local CharacterService = require("./CharacterService")
@@ -70,6 +73,11 @@ export type Entry = {
 	gated: boolean?,
 	-- Multiplier on damage taken (a monster's stagger window), 1 or nil for none.
 	vulnerability: number?,
+	-- Class ID (players and class bots) and class level, for abilities.
+	classId: string?,
+	level: number?,
+	-- Immune to stun, slow and taunt (structures).
+	ccImmune: boolean?,
 	-- Multiplier on damage taken from a given source, e.g. 0 from the front of an armoured
 	-- monster.
 	damageFilter: ((source: Entry?) -> number)?,
@@ -85,9 +93,18 @@ local CombatService = {
 	-- (player, kind, amount): proximity credit, e.g. a nearby minion died. XP from Phase 9,
 	-- gold from Phase 12.
 	credited = Signal.new() :: Signal.Signal<Player, string, number>,
-	-- Class level of a player for the stat function. Phase 9 replaces this with real levels.
+	-- (position, team, radius): a minion of `team` died here; hostiles within radius share
+	-- credit (ProgressionService uses it for tracked bots).
+	creditedNear = Signal.new() :: Signal.Signal<Vector3, number?, number>,
+	-- (sourceId, targetId, amount): a heal, heal over time, or shield absorbing damage.
+	supported = Signal.new() :: Signal.Signal<number, number, number>,
+	-- Class level of a player for the stat function (ProgressionService).
 	classLevelOf = function(_player: Player): number
 		return 1
+	end,
+	-- Active class of a player (ProgressionService, from the profile).
+	classOf = function(_player: Player): string
+		return Config.get().classes.default
 	end,
 	-- Whether a player may dodge right now (EggService: egg carriers cannot).
 	canDodge = function(_player: Player): boolean
@@ -185,6 +202,27 @@ local function clearLine(from: Vector3, to: Vector3): boolean
 	return workspace:Raycast(a, b - a, losParams) == nil
 end
 
+function CombatService.clearLine(from: Vector3, to: Vector3): boolean
+	return clearLine(from, to)
+end
+
+-- Where a move from `from` towards `to` along the ground stops: short of the first wall.
+function CombatService.clampMove(from: Vector3, to: Vector3): Vector3
+	local delta = Vector3.new(to.X - from.X, 0, to.Z - from.Z)
+	if #CombatService.losBlockers == 0 or delta.Magnitude < 1e-3 then
+		return to
+	end
+	losParams.FilterDescendantsInstances = CombatService.losBlockers
+	local a = Vector3.new(from.X, 2, from.Z)
+	local hit = workspace:Raycast(a, delta, losParams)
+	if hit == nil then
+		return to
+	end
+	local travel = math.max(0, (Vector3.new(hit.Position.X, 2, hit.Position.Z) - a).Magnitude - 2)
+	local stop = a + delta.Unit * travel
+	return Vector3.new(stop.X, from.Y, stop.Z)
+end
+
 local function playersNear(position: Vector3, range: number): { Player }
 	local list: { Player } = {}
 	for _, player in Players:GetPlayers() do
@@ -244,6 +282,78 @@ local function validateKnockbacks(t: number)
 	end
 end
 
+-- Healers and shielders of the killer and of each assister (recently) count as assists too.
+local function addSupportAssists(result: Damage.Result, killer: Entry?, at: number)
+	local window = Config.get().classes.supportWindow
+	local seen: { [number]: boolean } = {}
+	local helpers: { Entry } = {}
+	if killer then
+		seen[killer.combatant.id] = true
+		table.insert(helpers, killer)
+	end
+	for _, id in result.assists do
+		seen[id] = true
+		local e = entries[id]
+		if e then
+			table.insert(helpers, e)
+		end
+	end
+	for _, helper in helpers do
+		for _, id in Damage.supportersOf(helper.combatant, at, window) do
+			if not seen[id] then
+				seen[id] = true
+				table.insert(result.assists, id)
+			end
+		end
+	end
+end
+
+-- Underdog bonus (Phase 11): hitting a stronger player (or class bot) does more damage, capped.
+local function underdog(target: Entry, source: Entry?): number
+	if source == nil then
+		return 1
+	end
+	local function ranked(e: Entry): boolean
+		return e.kind == "player" or e.classId ~= nil
+	end
+	if not ranked(source) or not ranked(target) then
+		return 1
+	end
+	return Balance.underdog(source.power, target.power, Config.get().balance)
+end
+
+-- Teamwork: monsters take more damage the more distinct classes are hitting them (Phase 10).
+local function teamwork(target: Entry, source: Entry?, t: number): number
+	if source == nil or source.classId == nil or target.kind ~= "npc" or target.classId ~= nil then
+		return 1
+	end
+	local cfg = Config.get().classes
+	local seen: { [string]: boolean } = { [source.classId :: string] = true }
+	for id, at in target.combatant.contributors do
+		if t - at <= cfg.teamworkWindow then
+			local e = entries[id]
+			if e and e.classId then
+				seen[e.classId] = true
+			end
+		end
+	end
+	return Abilities.teamwork(seen, cfg.teamworkPerClass)
+end
+
+-- Pushes a player's server-side health to their Humanoid (after heals).
+function CombatService.syncHealth(entry: Entry)
+	local character = entry.player and entry.player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Health > 0 then
+		humanoid.Health = entry.combatant.health
+	end
+end
+
+-- Whether an entry is stunned right now.
+function CombatService.stunned(entry: Entry): boolean
+	return Status.stunned(entry.combatant.statuses, now())
+end
+
 -- Applies one hit through the damage pipeline and tells clients about it.
 function CombatService.applyHit(
 	sourceId: number,
@@ -260,6 +370,10 @@ function CombatService.applyHit(
 	end
 	local source = entries[sourceId]
 	local sourceTeam = if source then source.combatant.team else nil
+	-- An empowered attacker (Healer blessing) hits harder.
+	if source and source.combatant.statuses then
+		amount *= Status.damageDealtMultiplier(source.combatant.statuses, at or now())
+	end
 
 	if target.player then
 		local character = target.player.Character
@@ -275,6 +389,8 @@ function CombatService.applyHit(
 		modifiers = {
 			target.vulnerability or 1,
 			if target.damageFilter then target.damageFilter(source) else 1,
+			teamwork(target, source, at or now()),
+			underdog(target, source),
 		},
 	}, config().assistWindow)
 	if not result.applied then
@@ -296,6 +412,11 @@ function CombatService.applyHit(
 		target.onHit(result, push)
 	end
 	CombatService.damaged:fire(targetId, sourceId, result.amount)
+	if result.absorbed then
+		for shielder, absorbed in result.absorbed do
+			CombatService.supported:fire(shielder, targetId, absorbed)
+		end
+	end
 
 	-- Minion-on-minion hits send no event: health shows through snapshots, and damage numbers
 	-- for every minion scuffle would be clutter and bandwidth.
@@ -317,6 +438,7 @@ function CombatService.applyHit(
 	end
 
 	if result.killed then
+		addSupportAssists(result, source, at or now())
 		CombatService.unregister(targetId)
 		if target.announceKills ~= false then
 			Net.fireAllClients(Remotes.CombatKill, { killer = sourceId, victim = targetId, assists = result.assists })
@@ -442,27 +564,95 @@ end
 
 -- Player characters -------------------------------------------------------------------------
 
-local function attachSword(character: Model)
-	local hand = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
-	if hand == nil or not hand:IsA("BasePart") or character:FindFirstChild("Sword") then
+local function weaponPart(name: string, size: Vector3, color: Color3, material: Enum.Material, parent: Instance): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.Color = color
+	part.Material = material
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Massless = true
+	part.Parent = parent
+	return part
+end
+
+local function weld(part0: BasePart, part1: BasePart, c0: CFrame)
+	local w = Instance.new("Weld")
+	w.Part0 = part0
+	w.Part1 = part1
+	w.C0 = c0
+	w.Parent = part1
+end
+
+local function rgb(c: { number }): Color3
+	return Color3.fromRGB(c[1], c[2], c[3])
+end
+
+-- Puts the class weapon in the character's hand, dressed for the class level's milestone look
+-- (stub visuals: accent colour, then a glow, then sparkles). Replaces any weapon already there.
+function CombatService.dressWeapon(character: Model, classId: string, level: number)
+	local class = Config.get().classDefinitions[classId] or Config.get().classDefinitions.knight
+	local existing = character:FindFirstChild("Weapon")
+	if existing then
+		existing:Destroy()
+	end
+	local right = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
+	local left = character:FindFirstChild("LeftHand") or character:FindFirstChild("Left Arm")
+	if right == nil or not right:IsA("BasePart") or left == nil or not left:IsA("BasePart") then
 		return
 	end
-	local sword = Instance.new("Part")
-	sword.Name = "Sword"
-	sword.Size = Vector3.new(0.25, 0.25, 4.4)
-	sword.Color = Color3.fromRGB(200, 205, 215)
-	sword.Material = Enum.Material.Metal
-	sword.CanCollide = false
-	sword.CanQuery = false
-	sword.CanTouch = false
-	sword.Massless = true
-	local weld = Instance.new("Weld")
-	weld.Part0 = hand
-	weld.Part1 = sword
-	-- Blade extends forward from the grip.
-	weld.C0 = CFrame.new(0, -hand.Size.Y / 2 + 0.1, -2.1)
-	weld.Parent = sword
-	sword.Parent = character
+	local milestone = Abilities.milestone(class, level)
+	local accent = rgb(milestone.accent)
+	local model = Instance.new("Model")
+	model.Name = "Weapon"
+	model:SetAttribute("Class", class.id)
+	local grip = CFrame.new(0, -right.Size.Y / 2 + 0.1, 0)
+	local accentPart: Part
+	if class.weapon == "sword" then
+		-- Blade extends forward from the grip.
+		local blade =
+			weaponPart("Blade", Vector3.new(0.25, 0.25, 4.4), Color3.fromRGB(200, 205, 215), Enum.Material.Metal, model)
+		weld(right, blade, grip * CFrame.new(0, 0, -2.1))
+		accentPart = weaponPart("Guard", Vector3.new(1.2, 0.3, 0.3), accent, Enum.Material.Metal, model)
+		weld(right, accentPart, grip * CFrame.new(0, 0, -0.1))
+	elseif class.weapon == "bow" then
+		-- Held upright in the left hand.
+		local stave =
+			weaponPart("Stave", Vector3.new(0.25, 4.2, 0.4), Color3.fromRGB(120, 85, 50), Enum.Material.Wood, model)
+		weld(left, stave, CFrame.new(0, -left.Size.Y / 2, -0.3))
+		accentPart = weaponPart("Grip", Vector3.new(0.35, 0.7, 0.5), accent, Enum.Material.Fabric, model)
+		weld(left, accentPart, CFrame.new(0, -left.Size.Y / 2, -0.3))
+	elseif class.weapon == "staff" then
+		local shaft =
+			weaponPart("Shaft", Vector3.new(0.3, 5.5, 0.3), Color3.fromRGB(95, 70, 50), Enum.Material.Wood, model)
+		weld(right, shaft, grip * CFrame.new(0, 1, 0))
+		accentPart = weaponPart("Orb", Vector3.new(0.9, 0.9, 0.9), accent, Enum.Material.Neon, model)
+		weld(right, accentPart, grip * CFrame.new(0, 3.9, 0))
+	else
+		local stick =
+			weaponPart("Stick", Vector3.new(0.2, 0.2, 2), Color3.fromRGB(235, 230, 215), Enum.Material.Marble, model)
+		weld(right, stick, grip * CFrame.new(0, 0, -0.9))
+		accentPart = weaponPart("Gem", Vector3.new(0.5, 0.5, 0.5), accent, Enum.Material.Neon, model)
+		weld(right, accentPart, grip * CFrame.new(0, 0, -2))
+	end
+	if accentPart.Name == "Orb" or accentPart.Name == "Gem" then
+		accentPart.Shape = Enum.PartType.Ball
+	end
+	if milestone.glow then
+		local light = Instance.new("PointLight")
+		light.Color = accent
+		light.Range = 8
+		light.Brightness = 1.5
+		light.Parent = accentPart
+	end
+	if milestone.sparkles then
+		local sparkles = Instance.new("Sparkles")
+		sparkles.SparkleColor = accent
+		sparkles.Parent = accentPart
+	end
+	model.Parent = character
 end
 
 local function onCharacterSpawned(player: Player, character: Model)
@@ -478,11 +668,13 @@ local function onCharacterSpawned(player: Player, character: Model)
 	end
 
 	local level = CombatService.classLevelOf(player)
+	local classId = CombatService.classOf(player)
+	local class = Config.get().classDefinitions[classId] or Config.get().classDefinitions.knight
 	player:SetAttribute("ClassLevel", level)
-	local stats = Stats.compute(config().knight, level)
+	local stats = Stats.compute(class.stats, level)
 	humanoid.MaxHealth = stats.maxHealth
 	humanoid.Health = stats.maxHealth
-	attachSword(character)
+	CombatService.dressWeapon(character, class.id, level)
 
 	local combatant = Damage.newCombatant(player.UserId, TeamService.teamOf(player), stats.maxHealth, stats.defence)
 	local entry: Entry = {
@@ -493,6 +685,8 @@ local function onCharacterSpawned(player: Player, character: Model)
 		damage = stats.damage,
 		power = stats.power,
 		history = CombatService.newHistory(),
+		classId = class.id,
+		level = level,
 		position = function(): Vector3?
 			if root.Parent == nil then
 				return nil
@@ -512,7 +706,18 @@ end
 
 local function onAttack(player: Player, request: Remotes.AttackRequest)
 	local entry = entries[player.UserId]
-	if entry == nil or not entry.combatant.alive or not inputAllowed() or player:GetAttribute("Launching") then
+	if
+		entry == nil
+		or not entry.combatant.alive
+		or not inputAllowed()
+		or player:GetAttribute("Launching")
+		or CombatService.stunned(entry)
+	then
+		return
+	end
+	-- Only melee classes swing here; other classes' basic attacks are abilities (slot 0).
+	local class = Config.get().classDefinitions[entry.classId or ""]
+	if class and not class.basic.melee then
 		return
 	end
 	local t = now()
@@ -543,7 +748,13 @@ local function onDodge(player: Player)
 		return
 	end
 	local entry = entries[player.UserId]
-	if entry == nil or not entry.combatant.alive or not inputAllowed() or player:GetAttribute("Launching") then
+	if
+		entry == nil
+		or not entry.combatant.alive
+		or not inputAllowed()
+		or player:GetAttribute("Launching")
+		or CombatService.stunned(entry)
+	then
 		return
 	end
 	local t = now()

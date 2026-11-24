@@ -19,6 +19,8 @@ local Monsters: { [string]: Types.Definition } = {
 	splitter = require("@self/Splitter"),
 	splitling = require("@self/Splitling"),
 	burrower = require("@self/Burrower"),
+	-- Neutral jungle boss (Phase 11).
+	warden = require("@self/Warden"),
 }
 
 return Monsters
